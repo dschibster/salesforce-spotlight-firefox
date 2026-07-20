@@ -335,8 +335,38 @@
           <input type="radio" name="defaultDisplay" value="collapsed" id="displayCollapsed" checked />
           <span class="radio-text">
             <strong>Hidden</strong>
-            <span>Stay invisible until you press the keyboard shortcut.</span>
+            <span>Stay invisible until you press the keyboard shortcut or click the reopen button.</span>
           </span>
+        </label>
+      </div>
+    </section>
+
+    <section aria-labelledby="reopen-heading">
+      <h2 id="reopen-heading" class="section-title">Reopen button</h2>
+      <p class="section-hint">A small floating button appears while the bar is hidden, so you can reopen Spotlight with a click instead of the keyboard shortcut.</p>
+      <div class="row">
+        <span class="row-label"><span class="radio-text"><strong>Show reopen button</strong></span></span>
+        <label class="switch">
+          <input type="checkbox" id="reopenButtonToggle" checked />
+          <span class="switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="radio-group" role="radiogroup" aria-label="Reopen button position" style="margin-top: 10px">
+        <label class="radio-row">
+          <input type="radio" name="buttonPosition" value="top-left" id="posTopLeft" />
+          <span class="radio-text"><strong>Top left</strong></span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="buttonPosition" value="top-right" id="posTopRight" />
+          <span class="radio-text"><strong>Top right</strong></span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="buttonPosition" value="bottom-left" id="posBottomLeft" />
+          <span class="radio-text"><strong>Bottom left</strong></span>
+        </label>
+        <label class="radio-row">
+          <input type="radio" name="buttonPosition" value="bottom-right" id="posBottomRight" checked />
+          <span class="radio-text"><strong>Bottom right</strong></span>
         </label>
       </div>
     </section>

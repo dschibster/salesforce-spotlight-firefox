@@ -31,6 +31,9 @@
   /** Slash-command searches are deliberately scoped — allow a longer, scrollable list. */
   const MAX_RESULTS_SLASH = 50;
 
+  /** Corners the reopen button can be pinned to. */
+  const BUTTON_POSITIONS = ['bottom-left', 'bottom-right', 'top-left', 'top-right'];
+
   const DEFAULT_USER_SETTINGS = {
     enabledTypes: {
       Flow: true,
@@ -48,11 +51,14 @@
       App: true,
     },
     defaultDisplay: 'collapsed',
+    /** Small floating button shown while the bar is hidden, to reopen it without the keyboard shortcut. */
+    reopenButtonEnabled: true,
+    buttonPosition: 'bottom-right',
   };
 
   /**
    * @param {unknown} raw
-   * @returns {{ enabledTypes: Record<string, boolean>, defaultDisplay: 'expanded' | 'collapsed' }}
+   * @returns {{ enabledTypes: Record<string, boolean>, defaultDisplay: 'expanded' | 'collapsed', reopenButtonEnabled: boolean, buttonPosition: string }}
    */
   function mergeUserSettings(raw) {
     const enabledTypes = { ...DEFAULT_USER_SETTINGS.enabledTypes };
@@ -71,10 +77,18 @@
     ) {
       defaultDisplay = raw.defaultDisplay;
     }
-    return { enabledTypes, defaultDisplay };
+    let reopenButtonEnabled = DEFAULT_USER_SETTINGS.reopenButtonEnabled;
+    if (raw && typeof raw === 'object' && typeof raw.reopenButtonEnabled === 'boolean') {
+      reopenButtonEnabled = raw.reopenButtonEnabled;
+    }
+    let buttonPosition = DEFAULT_USER_SETTINGS.buttonPosition;
+    if (raw && typeof raw === 'object' && BUTTON_POSITIONS.includes(raw.buttonPosition)) {
+      buttonPosition = raw.buttonPosition;
+    }
+    return { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition };
   }
 
-  /** @type {{ enabledTypes: Record<string, boolean>, defaultDisplay: 'expanded' | 'collapsed' }} */
+  /** @type {{ enabledTypes: Record<string, boolean>, defaultDisplay: 'expanded' | 'collapsed', reopenButtonEnabled: boolean, buttonPosition: string }} */
   let userSettings = mergeUserSettings(null);
   /** @type {Record<string, number> | null} */
   let lastCounts = null;
@@ -147,13 +161,6 @@
   letter-spacing: 0.02em;
   font-size: 13px;
   white-space: nowrap;
-}
-
-.sfnav-brand-version {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--sfnav-muted);
-  letter-spacing: 0.06em;
 }
 
 .sfnav-search-wrap {
@@ -567,7 +574,6 @@
         <footer class="sfnav-bar" role="navigation" aria-label="Salesforce Spotlight">
           <div class="sfnav-brand-stack" title="Salesforce Spotlight">
             <div class="sfnav-brand">Salesforce Spotlight</div>
-            <div class="sfnav-brand-version" id="sfnavBrandVersion"></div>
           </div>
           <div class="sfnav-search-wrap">
             <input
@@ -1038,12 +1044,71 @@
     }
   }
 
-  // No reopen pill — the bar is summoned via the keyboard shortcut only.
+  const REOPEN_ID = 'sfnav-reopen-button';
+
+  /** Inline style string for the floating reopen button, anchored to the chosen corner. */
+  function reopenButtonStyle(position) {
+    const pos = BUTTON_POSITIONS.includes(position) ? position : DEFAULT_USER_SETTINGS.buttonPosition;
+    const vertical = pos.startsWith('top') ? 'top:24px' : 'bottom:24px';
+    const horizontal = pos.endsWith('left') ? 'left:24px' : 'right:24px';
+    return [
+      'position:fixed',
+      vertical,
+      horizontal,
+      'z-index:2147483645',
+      'padding:10px 18px',
+      'text-align:center',
+      'font-family:"Salesforce Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif',
+      'font-size:14px',
+      'font-weight:600',
+      'line-height:1.15',
+      'background:linear-gradient(135deg, #60a5fa, #c084fc)',
+      'color:#fff',
+      'border:none',
+      'border-radius:24px',
+      'cursor:pointer',
+      'box-shadow:0 8px 24px rgba(139, 92, 246, 0.3)',
+      'transition:transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+    ].join(';');
+  }
+
+  function removeReopenButton() {
+    const btn = document.getElementById(REOPEN_ID);
+    if (btn) btn.remove();
+  }
+
+  /** Small floating button shown while the bar is hidden — click to reopen. Position/visibility come from settings. */
+  function showReopenButton() {
+    if (!userSettings.reopenButtonEnabled) return;
+    const existing = document.getElementById(REOPEN_ID);
+    if (existing) {
+      existing.setAttribute('style', reopenButtonStyle(userSettings.buttonPosition));
+      return;
+    }
+    const btn = document.createElement('button');
+    btn.id = REOPEN_ID;
+    btn.type = 'button';
+    btn.title = 'Salesforce Spotlight';
+    btn.textContent = 'Spotlight';
+    btn.setAttribute('style', reopenButtonStyle(userSettings.buttonPosition));
+    btn.addEventListener('mouseover', () => {
+      btn.style.transform = 'translateY(-2px) scale(1.02)';
+      btn.style.boxShadow = '0 12px 32px rgba(139, 92, 246, 0.4)';
+    });
+    btn.addEventListener('mouseout', () => {
+      btn.style.transform = 'translateY(0) scale(1)';
+      btn.style.boxShadow = '0 8px 24px rgba(139, 92, 246, 0.3)';
+    });
+    btn.addEventListener('click', () => showFooter());
+    document.body.appendChild(btn);
+  }
+
   function hideFooter() {
     const host = document.getElementById(HOST_ID);
     if (host) {
       host.style.display = 'none';
     }
+    showReopenButton();
   }
 
   function showFooter() {
@@ -1051,6 +1116,7 @@
     if (host) {
       host.style.display = '';
     }
+    removeReopenButton();
   }
 
   /**
@@ -1098,6 +1164,17 @@
       } else {
         showFooter();
       }
+    }
+    const host = document.getElementById(HOST_ID);
+    const barHidden = !host || host.style.display === 'none';
+    if (prev.reopenButtonEnabled !== userSettings.reopenButtonEnabled) {
+      if (userSettings.reopenButtonEnabled) {
+        if (barHidden) showReopenButton();
+      } else {
+        removeReopenButton();
+      }
+    } else if (prev.buttonPosition !== userSettings.buttonPosition && barHidden) {
+      showReopenButton();
     }
   }
 
@@ -1150,16 +1227,6 @@
       refresh: qs(shadow, '#sfnavRefresh'),
       close: qs(shadow, '#sfnavClose'),
     };
-
-    try {
-      const manifest = chrome.runtime.getManifest();
-      const brandVer = qs(shadow, '#sfnavBrandVersion');
-      if (brandVer && manifest && manifest.version) {
-        brandVer.textContent = `v${manifest.version}`;
-      }
-    } catch {
-      /* ignore */
-    }
 
     els.input.addEventListener('input', onInput);
     els.input.addEventListener('keydown', onKeyDown);

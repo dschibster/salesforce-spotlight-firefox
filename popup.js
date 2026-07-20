@@ -18,6 +18,8 @@ const SF_ORIGINS = [
   'https://*.salesforce-setup.com/*',
 ];
 
+const BUTTON_POSITIONS = ['bottom-left', 'bottom-right', 'top-left', 'top-right'];
+
 const DEFAULT_SETTINGS = {
   enabledTypes: {
     Flow: true,
@@ -35,6 +37,8 @@ const DEFAULT_SETTINGS = {
     App: true,
   },
   defaultDisplay: 'collapsed',
+  reopenButtonEnabled: true,
+  buttonPosition: 'bottom-right',
 };
 
 function mergeWithDefaults(stored) {
@@ -50,7 +54,15 @@ function mergeWithDefaults(stored) {
   if (stored && (stored.defaultDisplay === 'expanded' || stored.defaultDisplay === 'collapsed')) {
     defaultDisplay = stored.defaultDisplay;
   }
-  return { enabledTypes, defaultDisplay };
+  let reopenButtonEnabled = DEFAULT_SETTINGS.reopenButtonEnabled;
+  if (stored && typeof stored.reopenButtonEnabled === 'boolean') {
+    reopenButtonEnabled = stored.reopenButtonEnabled;
+  }
+  let buttonPosition = DEFAULT_SETTINGS.buttonPosition;
+  if (stored && BUTTON_POSITIONS.includes(stored.buttonPosition)) {
+    buttonPosition = stored.buttonPosition;
+  }
+  return { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition };
 }
 
 function getSettingsFromForm() {
@@ -72,11 +84,16 @@ function getSettingsFromForm() {
   const expanded = document.getElementById('displayExpanded');
   const defaultDisplay =
     expanded && expanded.checked ? 'expanded' : 'collapsed';
-  return { enabledTypes, defaultDisplay };
+  const reopenButtonEnabled = Boolean(document.getElementById('reopenButtonToggle')?.checked);
+  const positionInput = document.querySelector('input[name="buttonPosition"]:checked');
+  const buttonPosition = positionInput && BUTTON_POSITIONS.includes(positionInput.value)
+    ? positionInput.value
+    : DEFAULT_SETTINGS.buttonPosition;
+  return { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition };
 }
 
 function applySettingsToForm(settings) {
-  const { enabledTypes, defaultDisplay } = settings;
+  const { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition } = settings;
   const flow = document.getElementById('typeFlow');
   const object = document.getElementById('typeObject');
   const lwc = document.getElementById('typeLwc');
@@ -110,6 +127,17 @@ function applySettingsToForm(settings) {
     if (collapsed) collapsed.checked = true;
   } else {
     if (expanded) expanded.checked = true;
+  }
+
+  const reopenButtonToggle = document.getElementById('reopenButtonToggle');
+  if (reopenButtonToggle) reopenButtonToggle.checked = reopenButtonEnabled !== false;
+
+  const positionInput = document.querySelector(`input[name="buttonPosition"][value="${buttonPosition}"]`);
+  if (positionInput) {
+    positionInput.checked = true;
+  } else {
+    const fallback = document.getElementById('posBottomRight');
+    if (fallback) fallback.checked = true;
   }
 }
 
@@ -159,6 +187,24 @@ function wireDisplayRadios() {
         saveSettings(getSettingsFromForm());
       });
     }
+  }
+}
+
+function wireReopenButtonToggle() {
+  const el = document.getElementById('reopenButtonToggle');
+  if (el) {
+    el.addEventListener('change', () => {
+      saveSettings(getSettingsFromForm());
+    });
+  }
+}
+
+function wireButtonPositionRadios() {
+  const inputs = document.querySelectorAll('input[name="buttonPosition"]');
+  for (const el of inputs) {
+    el.addEventListener('change', () => {
+      saveSettings(getSettingsFromForm());
+    });
   }
 }
 
@@ -296,6 +342,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   wireTypeToggles();
   wireDisplayRadios();
+  wireReopenButtonToggle();
+  wireButtonPositionRadios();
   wirePermissionGrant();
   refreshPermissionBanner();
   wireShortcutEditor();

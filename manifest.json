@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Salesforce Spotlight",
-  "version": "2.5.3",
+  "version": "2.6.0",
   "description": "Salesforce Spotlight: search flows, objects, LWC, Apex, profiles, permission sets, triggers, VF pages, setup pages, and more from the spotlight bar.",
   "browser_specific_settings": {
     "gecko": {
