@@ -96,6 +96,10 @@
   let statusHideTimer = null;
   const STATUS_AUTOHIDE_MS = 6000;
 
+  /** Auto-collapse timer: bar closes itself if the input sits unfocused this long. */
+  let blurCollapseTimer = null;
+  const BLUR_COLLAPSE_MS = 8000;
+
   /** Inlined from content.css — avoid fetch(chrome-extension://…) which MV3 / page CSP can block. */
   const SFNAV_SHADOW_CSS = `/* Scoped to Shadow DOM root — class names prefixed with sfnav- */
 
@@ -1105,6 +1109,7 @@
   }
 
   function hideFooter() {
+    clearBlurCollapse();
     const host = document.getElementById(HOST_ID);
     if (host) {
       host.style.display = 'none';
@@ -1118,6 +1123,26 @@
       host.style.display = '';
     }
     removeReopenButton();
+  }
+
+  function clearBlurCollapse() {
+    if (blurCollapseTimer) {
+      clearTimeout(blurCollapseTimer);
+      blurCollapseTimer = null;
+    }
+  }
+
+  /** Start after the input blurs: collapse the bar if it's still unfocused when the timer fires. */
+  function scheduleBlurCollapse() {
+    clearBlurCollapse();
+    blurCollapseTimer = setTimeout(() => {
+      blurCollapseTimer = null;
+      const host = document.getElementById(HOST_ID);
+      if (!host || host.style.display === 'none') return;
+      if (!els || !els.input) return;
+      if (shadow && shadow.activeElement === els.input) return; // refocused before the timer fired
+      hideFooter();
+    }, BLUR_COLLAPSE_MS);
   }
 
   /**
@@ -1232,10 +1257,14 @@
     els.input.addEventListener('input', onInput);
     els.input.addEventListener('keydown', onKeyDown);
     els.input.addEventListener('focus', () => {
+      clearBlurCollapse();
       if (normalizeQuery(els.input.value)) {
         filtered = filterComponents(els.input.value);
         renderDropdown();
       }
+    });
+    els.input.addEventListener('blur', () => {
+      scheduleBlurCollapse();
     });
 
     els.refresh.addEventListener('click', () => {
