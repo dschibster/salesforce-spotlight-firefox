@@ -60,14 +60,9 @@ Firefox MV3 treats host permissions as **optional**. Without the grant, the Spot
 
 ## Version
 
-**2.6.0** (Jul 2026). The authoritative version is in `manifest.json`.
+**2.0.0** (Jul 2026). The authoritative version is in `manifest.json`.
 
-- **2.6.0** - Reopen button is back (click to reopen instead of the shortcut only), now optional via a checkbox in the popup and positionable in any of the four screen corners; version number removed from the bar itself.
-- **2.3.0** - Shortcut editable in the popup (`commands.update`); reopen pill removed (shortcut-only); Esc hides the bar.
-- **2.2.x** - CMDT direct links (Open + Manage Records) via the classic setup domain; ManageUsersLightning; index counts auto-hide after load; container cookie-store support (Zen workspaces); `*.my.salesforce-setup.com` domain support.
-
-- **2.1.0** - Keyboard shortcut **Ctrl+Shift+Space** (also Ctrl on macOS, not Cmd) to toggle/focus the Spotlight bar; rebindable via Manage Extension Shortcuts.
-- **2.0.0** - Ported from Chrome to **Firefox** (MV3 event page, `browser_specific_settings.gecko`, Total-Cookie-Protection-safe cookie lookup, host-permission grant flow in the popup). Added **setup page search** (~60 curated pages, English + German keywords) and **Object Manager deep links** (Fields & Relationships, Record Types, Validation Rules, Page Layouts, Lightning Record Pages, Buttons/Links/Actions per object). Added `build.sh` to produce the xpi.
+- **2.0.0** - Ported from Chrome to **Firefox** (MV3 event page, `browser_specific_settings.gecko`, Total-Cookie-Protection-safe cookie lookup, host-permission grant flow in the popup). Added **setup page search** (~60 curated pages, English + German keywords) and **Object Manager deep links** (Fields & Relationships, Record Types, Validation Rules, Page Layouts, Lightning Record Pages, Buttons/Links/Actions per object). Keyboard shortcut **Ctrl+Shift+Space** (also Ctrl on macOS, not Cmd) to toggle/focus the Spotlight bar, rebindable in the popup or via Manage Extension Shortcuts; Esc hides the bar. CMDT direct links (Open + Manage Records) via the classic setup domain; ManageUsersLightning; index counts auto-hide after load; container cookie-store support (Zen workspaces); `*.my.salesforce-setup.com` domain support. Reopen button while the bar is hidden (click to bring it back), optional via a checkbox in the popup and positionable in any of the four screen corners. Added `build.sh` to produce the xpi.
 - **1.4.0** - last Chrome version: profiles, permission sets/groups, triggers, VF pages, type keywords, settings layout.
 
 ## Maintainers
