@@ -808,9 +808,10 @@
     const parsed = parseQuery(query);
 
     // "/" or unknown command → suggest commands as selectable pseudo-items.
+    // Types the user has turned off in settings are left out of the suggestion list.
     if (parsed.kind === 'commands') {
       return SLASH_COMMANDS
-        .filter((c) => c.cmd.startsWith(parsed.prefix))
+        .filter((c) => c.cmd.startsWith(parsed.prefix) && userSettings.enabledTypes[c.type])
         .map((c) => ({ isCommand: true, cmd: c.cmd, type: c.type, name: `/${c.cmd} — ${c.hint}` }));
     }
 
