@@ -2,7 +2,7 @@
 
 **Firefox extension** (Manifest V3) that adds a **Salesforce Spotlight** bar on Lightning and classic Salesforce domains. It loads metadata from your org (REST and Tooling APIs)—flows, objects, LWC bundles, Apex classes, **profiles**, **permission sets**, **permission set groups**, **Apex triggers**, **Visualforce pages**—plus **setup pages** (Deployment Status, Object Manager, Users, Debug Logs, and ~60 more) and **Object Manager deep links** (e.g. *Account › Fields & Relationships*), and lets you **search** with fuzzy multi-word matching. You can type a **component kind** as a keyword (for example **profile API access** to find a profile named "API Access", or **account validation** to jump to Account validation rules). Results **open** the matching page in a new tab.
 
-> Version 2.0.0 switched the project from Chrome to **Firefox**. For the last Chrome version, see release **1.4.0**.
+> This is a fork from znAaron's Chrome extension. For the Chrome extension, check out their repository here: https://github.com/znAaron/SalesforceSpotlight
 
 ## Requirements
 
