@@ -211,11 +211,115 @@
         font-size: 11px;
         color: var(--muted);
       }
+      .badge--setup {
+        background: rgba(148, 163, 184, 0.25);
+        color: #cbd5e1;
+      }
+      .badge--objectsetup {
+        background: rgba(20, 184, 166, 0.25);
+        color: #5eead4;
+      }
+      .badge--cmdt {
+        background: rgba(132, 204, 22, 0.25);
+        color: #bef264;
+      }
+      .badge--app {
+        background: rgba(14, 165, 233, 0.25);
+        color: #7dd3fc;
+      }
+      .perm-banner {
+        display: none;
+        margin: 0 0 16px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: rgba(251, 191, 36, 0.12);
+        border: 1px solid rgba(251, 191, 36, 0.35);
+        color: #fde68a;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+      .perm-banner.visible {
+        display: block;
+      }
+      .perm-banner button {
+        margin-top: 8px;
+        width: 100%;
+        padding: 8px 12px;
+        border: none;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #60a5fa, #c084fc);
+        color: #fff;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .perm-banner button:hover {
+        filter: brightness(1.1);
+      }
+      .shortcut-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .shortcut-input {
+        flex: 1;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        outline: none;
+        cursor: pointer;
+      }
+      .shortcut-input:focus {
+        border-color: rgba(139, 92, 246, 0.5);
+        box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+      }
+      .shortcut-reset {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .shortcut-reset:hover {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .shortcut-error {
+        margin: 6px 0 0;
+        min-height: 14px;
+        font-size: 11px;
+        color: #fbbf24;
+      }
     </style>
   </head>
   <body>
     <h1>Salesforce Spotlight</h1>
     <p class="subtitle">Settings</p>
+
+    <div class="perm-banner" id="permBanner">
+      <strong>Salesforce access not granted.</strong>
+      Firefox needs your OK before Spotlight can run on Salesforce pages.
+      <button type="button" id="permGrantBtn">Grant access to Salesforce</button>
+    </div>
+
+    <section aria-labelledby="shortcut-heading">
+      <h2 id="shortcut-heading" class="section-title">Keyboard shortcut</h2>
+      <p class="section-hint">Opens/closes the Spotlight bar. Click the field, then press the new combination (Ctrl/Alt/Cmd + key).</p>
+      <div class="shortcut-row">
+        <input type="text" class="shortcut-input" id="shortcutInput" readonly placeholder="Click, then press keys…" aria-label="Keyboard shortcut" />
+        <button type="button" class="shortcut-reset" id="shortcutReset" title="Reset to Ctrl+Shift+Space">Reset</button>
+      </div>
+      <p class="shortcut-error" id="shortcutError" aria-live="polite"></p>
+    </section>
 
     <section aria-labelledby="display-heading">
       <h2 id="display-heading" class="section-title">Default on page load</h2>
@@ -230,8 +334,8 @@
         <label class="radio-row">
           <input type="radio" name="defaultDisplay" value="collapsed" id="displayCollapsed" checked />
           <span class="radio-text">
-            <strong>Collapsed (pill)</strong>
-            <span>Only show the small Spotlight pill until you open it.</span>
+            <strong>Hidden</strong>
+            <span>Stay invisible until you press the keyboard shortcut.</span>
           </span>
         </label>
       </div>
@@ -300,6 +404,34 @@
         <span class="row-label"><span class="badge badge--vfpage">VF page</span></span>
         <label class="switch">
           <input type="checkbox" id="typeVFPage" data-type="VFPage" checked />
+          <span class="switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="row">
+        <span class="row-label"><span class="badge badge--setup">Setup</span></span>
+        <label class="switch">
+          <input type="checkbox" id="typeSetup" data-type="Setup" checked />
+          <span class="switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="row">
+        <span class="row-label"><span class="badge badge--objectsetup">Obj setup</span></span>
+        <label class="switch">
+          <input type="checkbox" id="typeObjectSetup" data-type="ObjectSetup" checked />
+          <span class="switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="row">
+        <span class="row-label"><span class="badge badge--cmdt">CMDT</span></span>
+        <label class="switch">
+          <input type="checkbox" id="typeCMDT" data-type="CMDT" checked />
+          <span class="switch-slider" aria-hidden="true"></span>
+        </label>
+      </div>
+      <div class="row">
+        <span class="row-label"><span class="badge badge--app">App</span></span>
+        <label class="switch">
+          <input type="checkbox" id="typeApp" data-type="App" checked />
           <span class="switch-slider" aria-hidden="true"></span>
         </label>
       </div>

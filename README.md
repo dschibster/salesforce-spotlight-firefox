@@ -1,77 +1,78 @@
 # Salesforce Spotlight
 
-Chrome extension (Manifest V3) that adds a **Salesforce Spotlight** bar on Lightning and classic Salesforce domains. It loads metadata from your org (REST and Tooling APIs)—flows, objects, LWC bundles, Apex classes, **profiles**, **permission sets**, **permission set groups**, **Apex triggers**, and **Visualforce pages**—and lets you **search** with fuzzy multi-word matching. You can type a **component kind** as a keyword (for example **profile API access** to find a profile named “API Access”). Results **open** the matching setup page in a new tab.
+**Firefox extension** (Manifest V3) that adds a **Salesforce Spotlight** bar on Lightning and classic Salesforce domains. It loads metadata from your org (REST and Tooling APIs)—flows, objects, LWC bundles, Apex classes, **profiles**, **permission sets**, **permission set groups**, **Apex triggers**, **Visualforce pages**—plus **setup pages** (Deployment Status, Object Manager, Users, Debug Logs, and ~60 more) and **Object Manager deep links** (e.g. *Account › Fields & Relationships*), and lets you **search** with fuzzy multi-word matching. You can type a **component kind** as a keyword (for example **profile API access** to find a profile named "API Access", or **account validation** to jump to Account validation rules). Results **open** the matching page in a new tab.
 
-**Repository:** [github.com/znAaron/SalesforceSpotlight](https://github.com/znAaron/SalesforceSpotlight)
-
-<img width="966" height="473" alt="Screenshot 2026-04-07 at 3 55 09 PM" src="https://github.com/user-attachments/assets/d73ad1cc-1c02-4fc1-9677-7433b09e56bb" />
+> Version 2.0.0 switched the project from Chrome to **Firefox**. For the last Chrome version, see release **1.4.0**.
 
 ## Requirements
 
-- Google Chrome (or another Chromium browser that supports Manifest V3 extensions)
+- **Firefox 140+** (regular Firefox for temporary install; **Developer Edition**, **Nightly**, or **ESR** for permanent unsigned install)
 - You must be **logged into Salesforce** in the same browser; the extension uses your **My Domain** session cookie for API calls.
 
-## Install from ZIP (release package)
+## Build the xpi
 
-1. Download **`SalesforceSpotlight.zip`** from the [Releases](https://github.com/znAaron/SalesforceSpotlight/releases) page (e.g. release **1.4**).
-2. **Unzip** the archive. You should see a folder whose **root** contains `manifest.json` (not an extra nested folder with only the zip name—if everything is inside one subfolder, use **that** folder in the next step).
-3. Open Chrome and go to **`chrome://extensions`**.
-4. Turn **Developer mode** **ON** (toggle in the top-right).
-5. Click **Load unpacked**.
-6. Select the **unzipped folder** (the one that contains `manifest.json` at the top level).
-7. Optional: click the **puzzle** icon in the toolbar → **pin** **Salesforce Spotlight**.
+```bash
+./build.sh
+```
 
-Chrome does **not** install extensions by opening the ZIP directly—you must **extract** it first, then use **Load unpacked**.
+This produces `dist/salesforce_spotlight-<version>.xpi`.
 
-## Install from source (this repository)
+## Install
 
-1. Clone or download this repo.
-2. In Chrome, open **`chrome://extensions`**, enable **Developer mode**, click **Load unpacked**, and choose the repository folder (where `manifest.json` lives).
+### Option A — Temporary (any Firefox, resets on browser restart)
+
+1. Open **`about:debugging#/runtime/this-firefox`**.
+2. Click **Load Temporary Add-on…**.
+3. Select the built **xpi** (or `manifest.json` in the repo folder).
+
+### Option B — Permanent unsigned (Developer Edition / Nightly / ESR)
+
+1. Open **`about:config`** and set **`xpinstall.signatures.required`** to **`false`**. (Regular Firefox ignores this switch; use Developer Edition, Nightly, or ESR.)
+2. Open **`about:addons`** → gear icon → **Install Add-on From File…** → select the xpi.
+
+### Grant Salesforce access (important!)
+
+Firefox MV3 treats host permissions as **optional**. Without the grant, the Spotlight bar will not appear on Salesforce pages.
+
+- Click the **Salesforce Spotlight** toolbar icon — if access is missing, the popup shows a **"Grant access to Salesforce"** button. Click it and accept.
+- Alternatively: **`about:addons`** → Salesforce Spotlight → **Permissions** tab → enable access to the Salesforce domains.
 
 ## Usage
 
 - Open any matching Salesforce URL (production, sandbox, Lightning, or My Domain).
-- **Toolbar settings:** click the **Salesforce Spotlight** extension icon to open the popup. **Default on page load** is at the top: choose **expanded** (full search bar) or **collapsed** (small pill). Below that, **search component types** lists every category (flows, objects, LWC, Apex, profiles, permission sets, permission set groups, triggers, VF pages). **All types are enabled by default**; turn off any you want to exclude from results. Settings are saved in the browser and apply to Salesforce tabs (including tabs that are already open).
+- **Keyboard shortcut:** press **Ctrl+Shift+Space** (same on macOS — the real Ctrl key, not Cmd) to open the Spotlight bar and focus the search field. Press again (or **Esc** in the search box) to hide it. The bar is only reachable via the shortcut — there is no on-page button. Change the binding directly in the **extension popup** (Keyboard shortcut section), or under `about:addons` → gear ⚙ → Manage Extension Shortcuts.
+- **Toolbar settings:** click the extension icon to open the popup. **Default on page load** is at the top: choose **expanded** (full search bar) or **collapsed** (small pill). Below that, **search component types** lists every category — including the new **Setup** (setup pages) and **Obj setup** (Object Manager deep links) types. **All types are enabled by default**; turn off any you want to exclude. Settings apply to Salesforce tabs immediately (including tabs that are already open).
 - By default, new installs start with the bar **collapsed**; click the pill to expand the full spotlight bar.
-- **Search:** every word you type must appear somewhere in the match (multi-token filter). You can include a **type keyword** in the query—e.g. **profile** plus part of the name—so results stay easy to narrow down.
-- Use the spotlight bar to search; choose a result to open it in a new tab.
-- Use **Refresh** on the bar to reload metadata from the org (results are cached for faster loads).
+- **Search:** every word you type must appear somewhere in the match (multi-token filter). Type keywords work too:
+  - `deployment` → **Deployment Status** setup page
+  - `account fields` → **Account › Fields & Relationships** in Object Manager
+  - `profile api access` → profile named "API Access"
+  - Setup pages also match common **German** terms (e.g. `benutzer` → Users, `validierungsregeln` → validation rules).
+- Choose a result to open it in a new tab.
+- Use **Refresh** on the bar to reload metadata from the org (results are cached for 10 minutes).
 - Use **Close** on the bar to hide it and show only the pill again.
 
 ## Privacy & security
 
-- The extension reads Salesforce **`sid`** cookies only for allowed Salesforce domains and uses them only to call Salesforce APIs from the extension’s service worker.
+- The extension reads Salesforce **`sid`** cookies only for allowed Salesforce domains and uses them only to call Salesforce APIs from the extension's background script.
 - No third-party servers; data stays between your browser and your Salesforce org.
 
 ## Version
 
-**1.4.0** (Apr 2026). The authoritative version is in `manifest.json`. **1.4** adds search for **profiles**, **permission sets**, **permission set groups**, **Apex triggers**, and **Visualforce pages**; **type keywords** in search text (e.g. typing “profile” to filter to profiles); and an updated **settings popup** (default bar mode first; all component types on by default). Earlier releases added the toolbar popup and **collapsed** as the default bar for new installs.
+**2.3.0** (Jul 2026). The authoritative version is in `manifest.json`.
 
-## Publishing (maintainers)
+- **2.3.0** — Shortcut editable in the popup (`commands.update`); reopen pill removed (shortcut-only); Esc hides the bar.
+- **2.2.x** — CMDT direct links (Open + Manage Records) via the classic setup domain; ManageUsersLightning; index counts auto-hide after load; container cookie-store support (Zen workspaces); `*.my.salesforce-setup.com` domain support.
 
-To push this repo to GitHub (after [creating the empty repo](https://github.com/znAaron/SalesforceSpotlight)):
+- **2.1.0** — Keyboard shortcut **Ctrl+Shift+Space** (also Ctrl on macOS, not Cmd) to toggle/focus the Spotlight bar; rebindable via Manage Extension Shortcuts.
+- **2.0.0** — Ported from Chrome to **Firefox** (MV3 event page, `browser_specific_settings.gecko`, Total-Cookie-Protection-safe cookie lookup, host-permission grant flow in the popup). Added **setup page search** (~60 curated pages, English + German keywords) and **Object Manager deep links** (Fields & Relationships, Record Types, Validation Rules, Page Layouts, Lightning Record Pages, Buttons/Links/Actions per object). Added `build.sh` to produce the xpi.
+- **1.4.0** — last Chrome version: profiles, permission sets/groups, triggers, VF pages, type keywords, settings layout.
 
-```bash
-cd "/path/to/SalesforceSpotlight"
-git remote add origin https://github.com/znAaron/SalesforceSpotlight.git   # skip if already added
-git branch -M main
-git push -u origin main
-```
+## Maintainers
 
-Use **GitHub CLI** (`gh`), a **personal access token** with HTTPS, or **SSH keys** if prompted for credentials.
-
-To publish **release 1.4** with the ZIP attached:
-
-1. On GitHub: **Releases** → **Draft a new release**.
-2. Choose tag **`v1.4.0`** (create new tag) or a short tag like **`1.4`** if you prefer; set **Release title** to **1.4** or **Salesforce Spotlight 1.4**.
-3. Upload **`SalesforceSpotlight.zip`** under **Attach binaries**.
-4. Publish the release.
-
-Or with GitHub CLI (if installed and authenticated):
-
-```bash
-gh release create v1.4.0 "/path/to/SalesforceSpotlight.zip" --repo znAaron/SalesforceSpotlight --title "1.4" --notes "Salesforce Spotlight v1.4.0 — profiles, permission sets/groups, triggers, VF pages; type keywords in search; settings layout (default bar first, all types on by default)"
-```
+- Bump `version` in `manifest.json`, run `./build.sh`, attach the xpi from `dist/` to a GitHub release.
+- Lint before release: `npx web-ext lint --source-dir . --ignore-files 'dist/**' 'build.sh' 'content.css' 'README.md'`
+- For distribution in **regular Firefox**, the xpi must be **signed** via [addons.mozilla.org](https://addons.mozilla.org) (listed or unlisted/self-distributed). `web-ext sign` with AMO API keys handles the unlisted flow.
 
 ## License
 

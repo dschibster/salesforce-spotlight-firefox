@@ -1,10 +1,10 @@
 /**
  * Salesforce Spotlight — footer bar, typeahead, keyboard navigation.
  *
- * Chrome DevTools on this script: open DevTools on the Salesforce tab (F12).
+ * Firefox DevTools on this script: open DevTools on the Salesforce tab (F12).
  * Console → filter “[Spotlight]”.
- * Sources → left sidebar → Page → chrome-extension://…/content.js → breakpoints.
- * API calls run in the background service worker with Bearer auth using the My Domain sid.
+ * Debugger → moz-extension://…/content.js → breakpoints.
+ * API calls run in the background script with Bearer auth using the My Domain sid.
  * Content script handles UI only and sends messages to background.
  */
 
@@ -25,10 +25,11 @@
   }
 
   const HOST_ID = 'sfnav-extension-host';
-  const REOPEN_ID = 'sfnav-reopen-button';
   const SETTINGS_KEY = 'sfnav_settings';
   const DEBOUNCE_MS = 150;
   const MAX_RESULTS = 10;
+  /** Slash-command searches are deliberately scoped — allow a longer, scrollable list. */
+  const MAX_RESULTS_SLASH = 50;
 
   const DEFAULT_USER_SETTINGS = {
     enabledTypes: {
@@ -41,6 +42,10 @@
       PermSetGroup: true,
       Trigger: true,
       VFPage: true,
+      Setup: true,
+      ObjectSetup: true,
+      CMDT: true,
+      App: true,
     },
     defaultDisplay: 'collapsed',
   };
@@ -73,6 +78,9 @@
   let userSettings = mergeUserSettings(null);
   /** @type {Record<string, number> | null} */
   let lastCounts = null;
+  /** Auto-hide timer: index counts show briefly after load, then vanish (less clutter). */
+  let statusHideTimer = null;
+  const STATUS_AUTOHIDE_MS = 6000;
 
   /** Inlined from content.css — avoid fetch(chrome-extension://…) which MV3 / page CSP can block. */
   const SFNAV_SHADOW_CSS = `/* Scoped to Shadow DOM root — class names prefixed with sfnav- */
@@ -481,6 +489,30 @@
   box-shadow: 0 0 0 1px inset rgba(99, 102, 241, 0.3);
 }
 
+.sfnav-badge--setup {
+  background: rgba(148, 163, 184, 0.25);
+  color: #cbd5e1;
+  box-shadow: 0 0 0 1px inset rgba(148, 163, 184, 0.3);
+}
+
+.sfnav-badge--objectsetup {
+  background: rgba(20, 184, 166, 0.25);
+  color: #5eead4;
+  box-shadow: 0 0 0 1px inset rgba(20, 184, 166, 0.3);
+}
+
+.sfnav-badge--cmdt {
+  background: rgba(132, 204, 22, 0.25);
+  color: #bef264;
+  box-shadow: 0 0 0 1px inset rgba(132, 204, 22, 0.3);
+}
+
+.sfnav-badge--app {
+  background: rgba(14, 165, 233, 0.25);
+  color: #7dd3fc;
+  box-shadow: 0 0 0 1px inset rgba(14, 165, 233, 0.3);
+}
+
 .sfnav-empty {
   padding: 16px 10px;
   color: var(--sfnav-muted);
@@ -542,7 +574,7 @@
               type="search"
               class="sfnav-input"
               id="sfnavInput"
-              placeholder="Search flows, objects, LWC, Apex, profiles, perm sets…"
+              placeholder="Search anything — type / to filter by type"
               autocomplete="off"
               spellcheck="false"
               aria-label="Search Salesforce components"
@@ -557,6 +589,7 @@
               <div class="sfnav-status-row" id="sfnavStatusRow1"></div>
               <div class="sfnav-status-row" id="sfnavStatusRow2"></div>
               <div class="sfnav-status-row" id="sfnavStatusRow3"></div>
+              <div class="sfnav-status-row" id="sfnavStatusRow4"></div>
             </div>
           </div>
           <div class="sfnav-actions">
@@ -568,8 +601,26 @@
     `;
   }
 
+  /** Fade the counts away after a moment; full numbers stay in the tooltip. */
+  function scheduleStatusAutoHide() {
+    if (statusHideTimer) clearTimeout(statusHideTimer);
+    statusHideTimer = setTimeout(() => {
+      statusHideTimer = null;
+      if (!els) return;
+      if (els.statusCounts) els.statusCounts.hidden = true;
+      if (els.statusSummary) {
+        els.statusSummary.textContent = '';
+        els.statusSummary.hidden = true;
+      }
+    }, STATUS_AUTOHIDE_MS);
+  }
+
   function setStatus(text, kind) {
     if (!els || !els.status) return;
+    if (statusHideTimer) {
+      clearTimeout(statusHideTimer);
+      statusHideTimer = null;
+    }
     const isError = kind === 'error';
     const isLoading = kind === 'loading';
     if (els.statusSummary) {
@@ -580,6 +631,7 @@
     if (els.statusRow1) els.statusRow1.textContent = '';
     if (els.statusRow2) els.statusRow2.textContent = '';
     if (els.statusRow3) els.statusRow3.textContent = '';
+    if (els.statusRow4) els.statusRow4.textContent = '';
     els.status.classList.toggle('sfnav-status--error', isError);
     els.status.classList.toggle('sfnav-status--loading', isLoading);
   }
@@ -603,8 +655,13 @@
       if (en.PermSet) parts3.push(`${c.permSets ?? 0} perm sets`);
       if (en.PermSetGroup) parts3.push(`${c.permSetGroups ?? 0} perm set groups`);
       if (en.VFPage) parts3.push(`${c.vfPages ?? 0} VF pages`);
+      const parts4 = [];
+      if (en.Setup) parts4.push(`${c.setup ?? 0} setup pages`);
+      if (en.ObjectSetup) parts4.push(`${c.objectSetup ?? 0} object setup links`);
+      if (en.CMDT) parts4.push(`${c.cmdt ?? 0} CMDT`);
+      if (en.App) parts4.push(`${c.apps ?? 0} apps`);
 
-      if (parts1.length === 0 && parts2.length === 0 && parts3.length === 0) {
+      if (parts1.length === 0 && parts2.length === 0 && parts3.length === 0 && parts4.length === 0) {
         if (els.statusCounts) els.statusCounts.hidden = true;
         if (els.statusSummary) {
           els.statusSummary.hidden = false;
@@ -620,13 +677,17 @@
       if (els.statusRow1) els.statusRow1.textContent = parts1.length ? parts1.join(' · ') : '—';
       if (els.statusRow2) els.statusRow2.textContent = parts2.length ? parts2.join(' · ') : '—';
       if (els.statusRow3) els.statusRow3.textContent = parts3.length ? parts3.join(' · ') : '—';
+      if (els.statusRow4) els.statusRow4.textContent = parts4.length ? parts4.join(' · ') : '—';
       if (els.statusCounts) els.statusCounts.hidden = false;
+      els.status.title = [...parts1, ...parts2, ...parts3, ...parts4].join('\n');
+      scheduleStatusAutoHide();
     } else {
       if (els.statusCounts) els.statusCounts.hidden = true;
       if (els.statusSummary) {
         els.statusSummary.hidden = false;
         els.statusSummary.textContent = itemFallback != null ? `${itemFallback} items` : '';
       }
+      scheduleStatusAutoHide();
     }
   }
 
@@ -685,13 +746,80 @@
     return (q || '').trim().toLowerCase();
   }
 
+  /** Slash commands: restrict the search to one component type, e.g. "/app nebula". */
+  const SLASH_COMMANDS = [
+    { cmd: 'app', type: 'App', hint: 'Apps' },
+    { cmd: 'flow', type: 'Flow', hint: 'Flows' },
+    { cmd: 'object', type: 'Object', hint: 'Objects' },
+    { cmd: 'setup', type: 'Setup', hint: 'Setup pages' },
+    { cmd: 'objsetup', type: 'ObjectSetup', hint: 'Object Manager pages' },
+    { cmd: 'cmdt', type: 'CMDT', hint: 'Custom metadata types' },
+    { cmd: 'apex', type: 'Apex', hint: 'Apex classes' },
+    { cmd: 'lwc', type: 'LWC', hint: 'Lightning web components' },
+    { cmd: 'profile', type: 'Profile', hint: 'Profiles' },
+    { cmd: 'permset', type: 'PermSet', hint: 'Permission sets' },
+    { cmd: 'psg', type: 'PermSetGroup', hint: 'Permission set groups' },
+    { cmd: 'trigger', type: 'Trigger', hint: 'Apex triggers' },
+    { cmd: 'vf', type: 'VFPage', hint: 'Visualforce pages' },
+  ];
+  /** Extra aliases → type (not shown in the command list). */
+  const SLASH_ALIASES = {
+    obj: 'Object',
+    class: 'Apex',
+    ps: 'PermSet',
+    permsetgroup: 'PermSetGroup',
+    vfpage: 'VFPage',
+    os: 'ObjectSetup',
+    anwendung: 'App',
+  };
+  const SLASH_TYPE_BY_CMD = (() => {
+    const m = { ...SLASH_ALIASES };
+    for (const c of SLASH_COMMANDS) m[c.cmd] = c.type;
+    return m;
+  })();
+
+  /**
+   * @returns {{ kind: 'search', type: string | null, q: string } | { kind: 'commands', prefix: string }}
+   */
+  function parseQuery(query) {
+    const trimmed = normalizeQuery(query);
+    if (!trimmed.startsWith('/')) return { kind: 'search', type: null, q: trimmed };
+    const sp = trimmed.indexOf(' ');
+    const tok = sp === -1 ? trimmed.slice(1) : trimmed.slice(1, sp);
+    const type = SLASH_TYPE_BY_CMD[tok];
+    if (type) {
+      return { kind: 'search', type, q: sp === -1 ? '' : trimmed.slice(sp + 1).trim() };
+    }
+    return { kind: 'commands', prefix: tok };
+  }
+
   /**
    * Multi-token fuzzy match: split query into words, every word must appear
    * somewhere in the haystack. "send pdf" matches "NOVA Automatic Send Quote PDF".
    * Scoring: exact substring > all-tokens-match; earlier positions rank higher.
    */
   function filterComponents(query) {
-    const q = normalizeQuery(query);
+    const parsed = parseQuery(query);
+
+    // "/" or unknown command → suggest commands as selectable pseudo-items.
+    if (parsed.kind === 'commands') {
+      return SLASH_COMMANDS
+        .filter((c) => c.cmd.startsWith(parsed.prefix))
+        .map((c) => ({ isCommand: true, cmd: c.cmd, type: c.type, name: `/${c.cmd} — ${c.hint}` }));
+    }
+
+    const q = parsed.q;
+    const restrictType = parsed.type;
+
+    const limit = restrictType ? MAX_RESULTS_SLASH : MAX_RESULTS;
+
+    // Bare command like "/app" → list everything of that type.
+    if (!q && restrictType) {
+      return components
+        .filter((item) => item.type === restrictType)
+        .sort((a, b) => (a.rank || 0) - (b.rank || 0) || a.name.localeCompare(b.name))
+        .slice(0, limit);
+    }
     if (!q) return [];
 
     const tokens = q.split(/\s+/).filter(Boolean);
@@ -700,12 +828,19 @@
     const scored = [];
     for (let i = 0; i < components.length; i += 1) {
       const item = components[i];
-      if (!userSettings.enabledTypes[item.type]) continue;
+      if (restrictType) {
+        // Explicit slash command overrides the type toggles in settings.
+        if (item.type !== restrictType) continue;
+      } else if (!userSettings.enabledTypes[item.type]) {
+        continue;
+      }
       const hay = item.searchText || item.name.toLowerCase();
+
+      const rank = item.rank || 0;
 
       const exactIdx = hay.indexOf(q);
       if (exactIdx !== -1) {
-        scored.push({ item, score: 0, pos: exactIdx, name: item.name });
+        scored.push({ item, score: 0, rank, pos: exactIdx, name: item.name });
         continue;
       }
 
@@ -720,17 +855,19 @@
         sumPos += idx;
       }
       if (allMatch) {
-        scored.push({ item, score: 1, pos: sumPos, name: item.name });
+        scored.push({ item, score: 1, rank, pos: sumPos, name: item.name });
       }
     }
 
     scored.sort((a, b) => {
       if (a.score !== b.score) return a.score - b.score;
+      // rank: deep links (Object Manager sub-pages) sort after primary items
+      if (a.rank !== b.rank) return a.rank - b.rank;
       if (a.pos !== b.pos) return a.pos - b.pos;
       return a.name.localeCompare(b.name);
     });
 
-    return scored.slice(0, MAX_RESULTS).map((s) => s.item);
+    return scored.slice(0, limit).map((s) => s.item);
   }
 
   function badgeClass(type) {
@@ -753,6 +890,14 @@
         return 'sfnav-badge sfnav-badge--trigger';
       case 'VFPage':
         return 'sfnav-badge sfnav-badge--vfpage';
+      case 'Setup':
+        return 'sfnav-badge sfnav-badge--setup';
+      case 'ObjectSetup':
+        return 'sfnav-badge sfnav-badge--objectsetup';
+      case 'CMDT':
+        return 'sfnav-badge sfnav-badge--cmdt';
+      case 'App':
+        return 'sfnav-badge sfnav-badge--app';
       default:
         return 'sfnav-badge';
     }
@@ -783,7 +928,14 @@
         row.className = 'sfnav-result' + (i === selectedIndex ? ' sfnav-result--active' : '');
         row.setAttribute('role', 'option');
         row.setAttribute('data-index', String(i));
-        row.innerHTML = `<span class="${badgeClass(item.type)}">${escapeHtml(item.type)}</span><span class="sfnav-result-name">${escapeHtml(item.name)}</span>`;
+        const badge = document.createElement('span');
+        badge.className = badgeClass(item.type);
+        badge.textContent = item.type;
+        const name = document.createElement('span');
+        name.className = 'sfnav-result-name';
+        name.textContent = item.name;
+        row.appendChild(badge);
+        row.appendChild(name);
         row.addEventListener('mousedown', (e) => {
           e.preventDefault();
           openItem(item);
@@ -798,25 +950,32 @@
     updateActiveRow();
   }
 
-  function escapeHtml(s) {
-    return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
   function updateActiveRow() {
     if (!els || !els.dropdown) return;
     const rows = els.dropdown.querySelectorAll('.sfnav-result');
     rows.forEach((row, i) => {
-      row.classList.toggle('sfnav-result--active', i === selectedIndex);
-      row.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
+      const active = i === selectedIndex;
+      row.classList.toggle('sfnav-result--active', active);
+      row.setAttribute('aria-selected', active ? 'true' : 'false');
+      if (active) {
+        row.scrollIntoView({ block: 'nearest' });
+      }
     });
   }
 
   function openItem(item) {
-    if (!item || !item.url) return;
+    if (!item) return;
+    // Selecting a command suggestion completes it in the input instead of navigating.
+    if (item.isCommand) {
+      if (els && els.input) {
+        els.input.value = `/${item.cmd} `;
+        els.input.focus();
+        filtered = filterComponents(els.input.value);
+        renderDropdown();
+      }
+      return;
+    }
+    if (!item.url) return;
     window.open(item.url, '_blank', 'noopener,noreferrer');
     if (els && els.input) {
       els.input.value = '';
@@ -846,7 +1005,8 @@
   function onKeyDown(e) {
     if (!els || !els.dropdown || els.dropdown.hidden) {
       if (e.key === 'Escape') {
-        els.input.blur();
+        e.preventDefault();
+        hideFooter();
       }
       return;
     }
@@ -878,12 +1038,12 @@
     }
   }
 
+  // No reopen pill — the bar is summoned via the keyboard shortcut only.
   function hideFooter() {
     const host = document.getElementById(HOST_ID);
     if (host) {
       host.style.display = 'none';
     }
-    showReopenButton();
   }
 
   function showFooter() {
@@ -891,54 +1051,34 @@
     if (host) {
       host.style.display = '';
     }
-    const reopen = document.getElementById(REOPEN_ID);
-    if (reopen) {
-      reopen.remove();
+  }
+
+  /**
+   * Keyboard shortcut (relayed from background via commands API):
+   * collapsed → expand + focus; expanded unfocused → focus; focused → collapse.
+   */
+  function toggleSpotlight() {
+    const host = document.getElementById(HOST_ID);
+    if (!host || !els || !els.input) return;
+    const hidden = host.style.display === 'none';
+    if (hidden) {
+      showFooter();
+      els.input.focus();
+      return;
+    }
+    const inputFocused = shadow && shadow.activeElement === els.input;
+    if (inputFocused) {
+      hideFooter();
+    } else {
+      els.input.focus();
     }
   }
 
-  function showReopenButton() {
-    if (document.getElementById(REOPEN_ID)) return;
-    const btn = document.createElement('button');
-    btn.id = REOPEN_ID;
-    btn.type = 'button';
-    const reopenVer = (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || '';
-    btn.setAttribute('title', 'Salesforce Spotlight');
-    btn.innerHTML =
-      '<span style="display:block;line-height:1.15;font-size:14px;font-weight:600">Spotlight</span>' +
-      (reopenVer
-        ? `<span style="display:block;font-size:10px;font-weight:600;opacity:0.92;margin-top:2px">v${reopenVer}</span>`
-        : '');
-    btn.setAttribute(
-      'style',
-      [
-        'position:fixed',
-        'right:24px',
-        'bottom:24px',
-        'z-index:2147483645',
-        'padding:10px 18px',
-        'text-align:center',
-        'font-family:system-ui,sans-serif',
-        'background:linear-gradient(135deg, #60a5fa, #c084fc)',
-        'color:#fff',
-        'border:none',
-        'border-radius:24px',
-        'cursor:pointer',
-        'box-shadow:0 8px 24px rgba(139, 92, 246, 0.3)',
-        'transition:all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
-      ].join(';')
-    );
-    btn.addEventListener('mouseover', () => {
-      btn.style.transform = 'translateY(-2px) scale(1.02)';
-      btn.style.boxShadow = '0 12px 32px rgba(139, 92, 246, 0.4)';
-    });
-    btn.addEventListener('mouseout', () => {
-      btn.style.transform = 'translateY(0) scale(1)';
-      btn.style.boxShadow = '0 8px 24px rgba(139, 92, 246, 0.3)';
-    });
-    btn.addEventListener('click', () => showFooter());
-    document.body.appendChild(btn);
-  }
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message && message.action === 'toggleSpotlight') {
+      toggleSpotlight();
+    }
+  });
 
   function onSettingsStorageChanged(changes, areaName) {
     if (areaName !== 'local' || !changes[SETTINGS_KEY]) return;
@@ -1006,6 +1146,7 @@
       statusRow1: qs(shadow, '#sfnavStatusRow1'),
       statusRow2: qs(shadow, '#sfnavStatusRow2'),
       statusRow3: qs(shadow, '#sfnavStatusRow3'),
+      statusRow4: qs(shadow, '#sfnavStatusRow4'),
       refresh: qs(shadow, '#sfnavRefresh'),
       close: qs(shadow, '#sfnavClose'),
     };

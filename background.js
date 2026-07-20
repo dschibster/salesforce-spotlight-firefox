@@ -1,9 +1,13 @@
 /**
- * Salesforce Spotlight — background service worker.
+ * Salesforce Spotlight — background script (Firefox MV3 event page).
  *
  * Key: Lightning (*.lightning.force.com) and My Domain (*.my.salesforce.com)
  * have DIFFERENT session IDs. REST API only works with the My Domain sid.
  * We read the sid cookie from the My Domain origin and use Bearer auth.
+ *
+ * Firefox note: chrome.* namespace works in Firefox MV3 (incl. promises).
+ * Cookie calls pass firstPartyDomain: null so cookies partitioned by
+ * Total Cookie Protection (dFPI) are found too.
  */
 
 const SFNAV_DEBUG = true;
@@ -20,7 +24,7 @@ function sidHint(sid) {
 }
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
-const CACHE_PREFIX = 'sfnav_v7_';
+const CACHE_PREFIX = 'sfnav_v13_';
 const API_VERSIONS = ['v66.0', 'v65.0', 'v64.0', 'v63.0', 'v62.0', 'v61.0', 'v60.0'];
 
 function resolveMyDomainOrigin(tabUrl) {
@@ -34,6 +38,15 @@ function resolveMyDomainOrigin(tabUrl) {
       const prefix = host.slice(0, -'.lightning.force.com'.length);
       return `https://${prefix}.my.salesforce.com`;
     }
+    // Enhanced domains: Setup pages live on *.my.salesforce-setup.com
+    if (host.endsWith('.sandbox.my.salesforce-setup.com')) {
+      const prefix = host.slice(0, -'.sandbox.my.salesforce-setup.com'.length);
+      return `https://${prefix}.sandbox.my.salesforce.com`;
+    }
+    if (host.endsWith('.my.salesforce-setup.com')) {
+      const prefix = host.slice(0, -'.my.salesforce-setup.com'.length);
+      return `https://${prefix}.my.salesforce.com`;
+    }
     return new URL(tabUrl).origin.replace(/\/$/, '');
   } catch {
     return '';
@@ -42,9 +55,41 @@ function resolveMyDomainOrigin(tabUrl) {
 
 function resolveUiOrigin(tabUrl) {
   try {
+    const host = new URL(tabUrl).hostname;
+    // Build result links on the Lightning domain, even when browsing Setup
+    // on the salesforce-setup.com domain.
+    if (host.endsWith('.sandbox.my.salesforce-setup.com')) {
+      const prefix = host.slice(0, -'.sandbox.my.salesforce-setup.com'.length);
+      return `https://${prefix}.sandbox.lightning.force.com`;
+    }
+    if (host.endsWith('.my.salesforce-setup.com')) {
+      const prefix = host.slice(0, -'.my.salesforce-setup.com'.length);
+      return `https://${prefix}.lightning.force.com`;
+    }
     return new URL(tabUrl).origin.replace(/\/$/, '');
   } catch {
     return '';
+  }
+}
+
+/**
+ * Enhanced domains: classic setup pages moved off my.salesforce.com onto
+ * *.my.salesforce-setup.com ("URL no longer exists" otherwise). Top-level
+ * navigation there is first-party, so the auth handshake works even with
+ * strict cookie blocking.
+ */
+function classicSetupOrigin(apiBase) {
+  try {
+    const host = new URL(apiBase).hostname;
+    if (host.endsWith('.sandbox.my.salesforce.com')) {
+      return `https://${host.slice(0, -'.sandbox.my.salesforce.com'.length)}.sandbox.my.salesforce-setup.com`;
+    }
+    if (host.endsWith('.my.salesforce.com')) {
+      return `https://${host.slice(0, -'.my.salesforce.com'.length)}.my.salesforce-setup.com`;
+    }
+    return apiBase.replace(/\/$/, '');
+  } catch {
+    return apiBase;
   }
 }
 
@@ -74,7 +119,94 @@ const TYPE_SEARCH_KEYWORDS = {
   PermSetGroup: 'permission set group permsetgroup perm set group psg',
   Trigger: 'trigger apex trigger',
   VFPage: 'visualforce vf page vfpage',
+  Setup: 'setup',
+  ObjectSetup: 'object setup manager',
+  CMDT: 'cmdt custom metadata type',
+  App: 'app application anwendung launcher',
 };
+
+/**
+ * Static setup pages. `path` is appended to the UI origin.
+ * `kw` holds extra search aliases (English + common German terms).
+ */
+const SETUP_PAGES = [
+  { label: 'Setup Home', path: '/lightning/setup/SetupOneHome/home', kw: 'home start' },
+  { label: 'Object Manager', path: '/lightning/setup/ObjectManager/home', kw: 'objekt objects' },
+  { label: 'Deployment Status', path: '/lightning/setup/DeployStatus/home', kw: 'deploy deployments bereitstellung' },
+  { label: 'Flows', path: '/lightning/setup/Flows/home', kw: 'flow list all flows' },
+  { label: 'Users', path: '/lightning/setup/ManageUsersLightning/home', kw: 'user benutzer manage users' },
+  { label: 'Profiles', path: '/lightning/setup/EnhancedProfiles/home', kw: 'profile profil' },
+  { label: 'Permission Sets', path: '/lightning/setup/PermSets/home', kw: 'permset berechtigungssatz' },
+  { label: 'Permission Set Groups', path: '/lightning/setup/PermSetGroups/home', kw: 'psg berechtigungssatzgruppe' },
+  { label: 'Public Groups', path: '/lightning/setup/PublicGroups/home', kw: 'group gruppe' },
+  { label: 'Queues', path: '/lightning/setup/Queues/home', kw: 'queue warteschlange' },
+  { label: 'Roles', path: '/lightning/setup/Roles/home', kw: 'role rolle hierarchy' },
+  { label: 'Company Information', path: '/lightning/setup/CompanyProfileInfo/home', kw: 'org id licenses lizenzen firmeninformationen' },
+  { label: 'Business Hours', path: '/lightning/setup/BusinessHours/home', kw: 'geschäftszeiten' },
+  { label: 'Apex Classes', path: '/lightning/setup/ApexClasses/home', kw: 'apex class list' },
+  { label: 'Apex Triggers', path: '/lightning/setup/ApexTriggers/home', kw: 'trigger list' },
+  { label: 'Apex Test Execution', path: '/lightning/setup/ApexTestQueue/home', kw: 'test run tests' },
+  { label: 'Apex Jobs', path: '/lightning/setup/AsyncApexJobs/home', kw: 'batch async jobs' },
+  { label: 'Scheduled Jobs', path: '/lightning/setup/ScheduledJobs/home', kw: 'cron schedule geplante jobs' },
+  { label: 'Debug Logs', path: '/lightning/setup/ApexDebugLogs/home', kw: 'logs trace debugging' },
+  { label: 'Email Deliverability', path: '/lightning/setup/OrgEmailSettings/home', kw: 'email access level zustellbarkeit' },
+  { label: 'Classic Email Templates', path: '/lightning/setup/CommunicationTemplatesEmail/home', kw: 'email template vorlage' },
+  { label: 'Custom Labels', path: '/lightning/setup/ExternalStrings/home', kw: 'label benutzerdefinierte bezeichnungen' },
+  { label: 'Custom Metadata Types', path: '/lightning/setup/CustomMetadata/home', kw: 'cmdt metadata' },
+  { label: 'Custom Settings', path: '/lightning/setup/CustomSettings/home', kw: 'hierarchy list settings' },
+  { label: 'Custom Permissions', path: '/lightning/setup/CustomPermissions/home', kw: 'permission' },
+  { label: 'Static Resources', path: '/lightning/setup/StaticResources/home', kw: 'resource statisch' },
+  { label: 'Named Credentials', path: '/lightning/setup/NamedCredential/home', kw: 'credential endpoint' },
+  { label: 'Auth. Providers', path: '/lightning/setup/AuthProviders/home', kw: 'authentication oauth provider' },
+  { label: 'Remote Site Settings', path: '/lightning/setup/SecurityRemoteProxy/home', kw: 'remote site callout' },
+  { label: 'CORS', path: '/lightning/setup/CorsWhitelistEntries/home', kw: 'cross origin allowlist' },
+  { label: 'Connected Apps', path: '/lightning/setup/ConnectedApplication/home', kw: 'oauth app manage' },
+  { label: 'App Manager', path: '/lightning/setup/NavigationMenus/home', kw: 'apps lightning app anwendungsmanager' },
+  { label: 'External Services', path: '/lightning/setup/ExternalServices/home', kw: 'openapi registration' },
+  { label: 'Sharing Settings', path: '/lightning/setup/SecuritySharing/home', kw: 'owd org wide defaults sharing rules freigabe' },
+  { label: 'Login History', path: '/lightning/setup/OrgLoginHistory/home', kw: 'login anmeldeverlauf' },
+  { label: 'Setup Audit Trail', path: '/lightning/setup/SecurityEvents/home', kw: 'audit history änderungsprotokoll' },
+  { label: 'Session Settings', path: '/lightning/setup/SecuritySession/home', kw: 'session timeout sitzung' },
+  { label: 'Password Policies', path: '/lightning/setup/SecurityPolicies/home', kw: 'password kennwort richtlinien' },
+  { label: 'Health Check', path: '/lightning/setup/HealthCheck/home', kw: 'security zustandsprüfung' },
+  { label: 'Storage Usage', path: '/lightning/setup/CompanyResourceDisk/home', kw: 'storage speicher data usage' },
+  { label: 'Data Export', path: '/lightning/setup/DataManagementExport/home', kw: 'export backup datenexport' },
+  { label: 'Data Import Wizard', path: '/lightning/setup/DataManagementDataImporter/home', kw: 'import datenimport' },
+  { label: 'Mass Delete Records', path: '/lightning/setup/DataManagementDelete/home', kw: 'delete massenlöschung' },
+  { label: 'Sandboxes', path: '/lightning/setup/DataManagementCreateTestInstance/home', kw: 'sandbox refresh' },
+  { label: 'Outbound Change Sets', path: '/lightning/setup/OutboundChangeSet/home', kw: 'changeset deploy' },
+  { label: 'Inbound Change Sets', path: '/lightning/setup/InboundChangeSet/home', kw: 'changeset validate' },
+  { label: 'Installed Packages', path: '/lightning/setup/ImportedPackage/home', kw: 'package managed installierte pakete' },
+  { label: 'Tabs', path: '/lightning/setup/CustomTabs/home', kw: 'tab registerkarten' },
+  { label: 'Translation Workbench', path: '/lightning/setup/LabelWorkbenchTranslate/home', kw: 'translate übersetzung' },
+  { label: 'Process Automation Settings', path: '/lightning/setup/ProcessAutomationSettings/home', kw: 'flow automation settings' },
+  { label: 'Lightning App Builder', path: '/lightning/setup/FlexiPageList/home', kw: 'flexipage record page' },
+  { label: 'Picklist Value Sets', path: '/lightning/setup/Picklists/home', kw: 'global picklist auswahlliste' },
+  { label: 'Digital Experiences — All Sites', path: '/lightning/setup/SetupNetworks/home', kw: 'community experience cloud sites' },
+  { label: 'User Interface', path: '/lightning/setup/UserInterfaceUI/home', kw: 'ui settings benutzeroberfläche' },
+  { label: 'Themes and Branding', path: '/lightning/setup/ThemingAndBranding/home', kw: 'theme branding design' },
+  { label: 'My Domain', path: '/lightning/setup/OrgDomain/home', kw: 'domain url' },
+  { label: 'Single Sign-On Settings', path: '/lightning/setup/SingleSignOn/home', kw: 'sso saml' },
+  { label: 'Certificate and Key Management', path: '/lightning/setup/CertificatesAndKeysManagement/home', kw: 'certificate zertifikat keys' },
+  { label: 'Duplicate Rules', path: '/lightning/setup/DuplicateRules/home', kw: 'duplicate dublette' },
+  { label: 'Matching Rules', path: '/lightning/setup/MatchingRules/home', kw: 'matching dublette' },
+  { label: 'Approval Processes', path: '/lightning/setup/ApprovalProcesses/home', kw: 'approval genehmigung' },
+  { label: 'Workflow Rules', path: '/lightning/setup/WorkflowRules/home', kw: 'workflow regel' },
+  { label: 'Big Objects', path: '/lightning/setup/BigObjects/home', kw: 'big object' },
+];
+
+/**
+ * Object Manager sub-pages generated per queryable sobject.
+ * `node` is the ObjectManager URL segment, `kw` extra search words.
+ */
+const OBJECT_SETUP_SUBPAGES = [
+  { suffix: 'Fields & Relationships', node: 'FieldsAndRelationships', kw: 'fields felder relationships' },
+  { suffix: 'Record Types', node: 'RecordTypes', kw: 'record types datensatztypen' },
+  { suffix: 'Validation Rules', node: 'ValidationRules', kw: 'validation rules validierungsregeln' },
+  { suffix: 'Page Layouts', node: 'PageLayouts', kw: 'page layouts seitenlayouts' },
+  { suffix: 'Lightning Record Pages', node: 'LightningPages', kw: 'lightning record pages flexipage' },
+  { suffix: 'Buttons, Links, and Actions', node: 'ButtonsLinksActions', kw: 'buttons links actions schaltflächen' },
+];
 
 /**
  * @param {string} type
@@ -87,31 +219,80 @@ function searchTextWithTypeKeywords(type, base) {
 }
 
 /**
+ * cookies.getAll with progressively simpler params. Firefox needs
+ * firstPartyDomain: null (First-Party Isolation) and partitionKey: {}
+ * (Total Cookie Protection) to see every cookie jar — but older versions
+ * reject unknown params, so fall back gracefully.
+ */
+async function getSidCookies(details, storeIds) {
+  const variants = [
+    { ...details, firstPartyDomain: null, partitionKey: {} },
+    { ...details, firstPartyDomain: null },
+    { ...details },
+  ];
+  for (const storeId of storeIds) {
+    for (const v of variants) {
+      const d = storeId ? { ...v, storeId } : v;
+      try {
+        const list = await chrome.cookies.getAll(d);
+        if (list && list.length) {
+          dbg('cookies found', { storeId: storeId || '(default)', params: Object.keys(d).join(','), count: list.length });
+          return list;
+        }
+      } catch (e) {
+        dbgWarn('cookies.getAll variant failed', storeId || '(default)', JSON.stringify(Object.keys(d)), e);
+      }
+    }
+  }
+  return [];
+}
+
+/**
+ * Container tabs (Firefox Multi-Account Containers, Zen workspaces, private
+ * windows) keep cookies in separate stores. The background's default store
+ * often is NOT where the Salesforce session lives — so search the tab's own
+ * store first, then the default, then every other store.
+ */
+async function candidateStoreIds(tabStoreId) {
+  const ids = [];
+  if (tabStoreId) ids.push(tabStoreId);
+  ids.push(undefined); // background context's default store
+  try {
+    const stores = await chrome.cookies.getAllCookieStores();
+    dbg('cookie stores:', stores.map((s) => s && s.id));
+    for (const s of stores) {
+      if (s && s.id && !ids.includes(s.id)) ids.push(s.id);
+    }
+  } catch (e) {
+    dbgWarn('getAllCookieStores failed', e);
+  }
+  return ids;
+}
+
+/**
  * Read the sid cookie from My Domain (the one that works for REST API).
  * Lightning sid does NOT work — it's a different session.
  */
-async function getMyDomainSession(tabUrl) {
+async function getMyDomainSession(tabUrl, tabStoreId) {
   const myDomainOrigin = resolveMyDomainOrigin(tabUrl);
   const uiOrigin = resolveUiOrigin(tabUrl);
 
-  dbg('resolving session', { uiOrigin, myDomainOrigin });
+  dbg('resolving session', { uiOrigin, myDomainOrigin, tabStoreId });
+  const storeIds = await candidateStoreIds(tabStoreId);
 
   if (myDomainOrigin) {
-    try {
-      const c = await chrome.cookies.get({ url: `${myDomainOrigin}/`, name: 'sid' });
-      if (c && c.value) {
-        dbg('sid from My Domain ✓', { origin: myDomainOrigin, sid: sidHint(c.value) });
-        return { sid: c.value.trim(), apiBase: myDomainOrigin, uiOrigin };
-      }
-      dbg('no sid cookie on My Domain', myDomainOrigin);
-    } catch (e) {
-      dbgWarn('cookies.get My Domain error', e);
+    const list = await getSidCookies({ url: `${myDomainOrigin}/`, name: 'sid' }, storeIds);
+    const c = list.find((x) => x && x.value);
+    if (c) {
+      dbg('sid from My Domain ✓', { origin: myDomainOrigin, sid: sidHint(c.value) });
+      return { sid: c.value.trim(), apiBase: myDomainOrigin, uiOrigin };
     }
+    dbg('no sid cookie on My Domain', myDomainOrigin);
   }
 
   dbg('scanning all sid cookies...');
   try {
-    const all = await chrome.cookies.getAll({ name: 'sid' });
+    const all = await getSidCookies({ name: 'sid' }, storeIds);
     dbg('total sid cookies:', all.length);
     for (const c of all) {
       const d = (c.domain || '').toLowerCase();
@@ -207,6 +388,7 @@ async function fetchSobjects(apiBase, sid, apiVersion) {
 
 function buildComponentList(
   uiOrigin,
+  apiBase,
   flows,
   sobjects,
   lwcs,
@@ -215,10 +397,27 @@ function buildComponentList(
   permSets,
   permSetGroups,
   triggers,
-  vfPages
+  vfPages,
+  customObjects,
+  apps
 ) {
   const items = [];
   const o = uiOrigin.replace(/\/$/, '');
+  // Classic setup pages linked top-level on the setup domain — avoids both
+  // the cross-domain-iframe dead end (Lightning wrapper) and the
+  // "URL no longer exists" page (my.salesforce.com no longer serves setup).
+  const my = classicSetupOrigin(apiBase || o);
+
+  // CMDT setup links need the CustomObject Id (01I…) from the Tooling API,
+  // matched to the describeGlobal name (ns__Dev__mdt).
+  const mdtIdByApiName = new Map();
+  for (const co of customObjects) {
+    const dev = firstDefined(co, ['DeveloperName', 'developerName']);
+    const ns = firstDefined(co, ['NamespacePrefix', 'namespacePrefix']);
+    const id = firstDefined(co, ['Id', 'id']);
+    if (!dev || !id) continue;
+    mdtIdByApiName.set(`${ns ? `${ns}__` : ''}${dev}__mdt`.toLowerCase(), id);
+  }
 
   for (const f of flows) {
     const label = firstDefined(f, ['Label', 'label']) || firstDefined(f, ['ApiName', 'apiName']) || 'Flow';
@@ -238,13 +437,72 @@ function buildComponentList(
   }
   for (const s of sobjects) {
     const apiName = s.name || s.Name;
-    if (!apiName || !s.retrieveable || apiName.endsWith('__ChangeEvent')) continue;
+    if (!apiName) continue;
     const label = s.label || s.Label || apiName;
+    // Custom metadata types: direct "open" + "manage records" setup links
+    // instead of an (unusable) Object Manager entry.
+    if (apiName.endsWith('__mdt')) {
+      const mdtId = mdtIdByApiName.get(apiName.toLowerCase());
+      const keyPrefix = s.keyPrefix || s.KeyPrefix;
+      if (mdtId) {
+        items.push({
+          type: 'CMDT',
+          name: `${label} — Open (${apiName})`,
+          searchText: searchTextWithTypeKeywords('CMDT', `${label} ${apiName} open`),
+          url: `${my}/${mdtId}?setupid=CustomMetadata`,
+        });
+      }
+      // Classic lists an entity's records under its key prefix (m0X…) —
+      // the reliable "Manage Records" target.
+      if (keyPrefix) {
+        items.push({
+          type: 'CMDT',
+          name: `${label} — Manage Records (${apiName})`,
+          searchText: searchTextWithTypeKeywords('CMDT', `${label} ${apiName} manage records`),
+          url: `${my}/${keyPrefix}?setupid=CustomMetadata`,
+        });
+      }
+      continue;
+    }
+    if (!s.retrieveable || apiName.endsWith('__ChangeEvent')) continue;
     items.push({
       type: 'Object',
       name: `${label} (${apiName})`,
       searchText: searchTextWithTypeKeywords('Object', `${label} ${apiName}`),
       url: `${o}/lightning/setup/ObjectManager/${encodeURIComponent(apiName)}/Details/view`,
+    });
+    // Object Manager deep links — only for real setup-manageable objects
+    // (customSetting/system objects clutter; keep those without subpages).
+    if (s.customSetting) continue;
+    for (const sub of OBJECT_SETUP_SUBPAGES) {
+      items.push({
+        type: 'ObjectSetup',
+        name: `${label} › ${sub.suffix}`,
+        searchText: searchTextWithTypeKeywords('ObjectSetup', `${label} ${apiName} ${sub.kw}`),
+        url: `${o}/lightning/setup/ObjectManager/${encodeURIComponent(apiName)}/${sub.node}/view`,
+        rank: 1,
+      });
+    }
+  }
+  for (const sp of SETUP_PAGES) {
+    items.push({
+      type: 'Setup',
+      name: sp.label,
+      searchText: searchTextWithTypeKeywords('Setup', `${sp.label} ${sp.kw}`),
+      url: `${o}${sp.path}`,
+    });
+  }
+  for (const a of apps) {
+    const durableId = firstDefined(a, ['DurableId', 'durableId']);
+    const label = firstDefined(a, ['Label', 'label']);
+    const dev = firstDefined(a, ['DeveloperName', 'developerName']);
+    if (!durableId || !label) continue;
+    const display = dev && dev !== label ? `${label} (${dev})` : label;
+    items.push({
+      type: 'App',
+      name: display,
+      searchText: searchTextWithTypeKeywords('App', `${label} ${dev}`),
+      url: `${o}/lightning/app/${encodeURIComponent(durableId)}`,
     });
   }
   for (const b of lwcs) {
@@ -327,10 +585,26 @@ function buildComponentList(
   return items;
 }
 
-async function loadFromNetwork(tabUrl) {
-  const session = await getMyDomainSession(tabUrl);
+async function loadFromNetwork(tabUrl, tabStoreId) {
+  const session = await getMyDomainSession(tabUrl, tabStoreId);
   if (!session) {
-    throw new Error('No My Domain sid cookie. Make sure you are logged in.');
+    // Distinguish "not logged in" from "Firefox host permission missing" —
+    // without the grant, the cookies API silently hides the sid cookie.
+    const myDomainOrigin = resolveMyDomainOrigin(tabUrl);
+    let permHint = '';
+    try {
+      if (myDomainOrigin) {
+        const granted = await chrome.permissions.contains({ origins: [`${myDomainOrigin}/*`] });
+        if (!granted) {
+          permHint =
+            ` Firefox has not granted access to ${myDomainOrigin}. ` +
+            'Click the Spotlight toolbar icon → "Grant access to Salesforce", then Refresh.';
+        }
+      }
+    } catch (e) {
+      dbgWarn('permissions.contains failed', e);
+    }
+    throw new Error(`No My Domain sid cookie. Make sure you are logged in.${permHint}`);
   }
   const { sid, apiBase, uiOrigin } = session;
   dbg('loadFromNetwork', { apiBase, sid: sidHint(sid) });
@@ -353,6 +627,8 @@ async function loadFromNetwork(tabUrl) {
     permSetGroups,
     triggers,
     vfPages,
+    customObjects,
+    apps,
   ] = await Promise.all([
     soqlQuery(apiBase, sid, apiVersion,
       'SELECT Id,Label,ApiName,ProcessType,ActiveVersionId FROM FlowDefinitionView', 'flows', false
@@ -379,10 +655,17 @@ async function loadFromNetwork(tabUrl) {
     soqlQuery(apiBase, sid, apiVersion,
       'SELECT Id,Name FROM ApexPage WHERE NamespacePrefix = null', 'vfPages', true
     ).catch(e => { dbgWarn('vfPages', e); return []; }),
+    soqlQuery(apiBase, sid, apiVersion,
+      'SELECT Id,DeveloperName,NamespacePrefix FROM CustomObject', 'customObjects', true
+    ).catch(e => { dbgWarn('customObjects', e); return []; }),
+    soqlQuery(apiBase, sid, apiVersion,
+      "SELECT DurableId,Label,DeveloperName FROM AppDefinition WHERE UiType = 'Lightning'", 'apps', false
+    ).catch(e => { dbgWarn('apps', e); return []; }),
   ]);
 
   const components = buildComponentList(
     uiOrigin,
+    apiBase,
     flows,
     sobjects,
     lwcs,
@@ -391,7 +674,9 @@ async function loadFromNetwork(tabUrl) {
     permSets,
     permSetGroups,
     triggers,
-    vfPages
+    vfPages,
+    customObjects,
+    apps
   );
   const counts = {
     flows: flows.length,
@@ -403,20 +688,45 @@ async function loadFromNetwork(tabUrl) {
     permSetGroups: permSetGroups.length,
     triggers: triggers.length,
     vfPages: vfPages.length,
+    setup: SETUP_PAGES.length,
+    objectSetup: components.filter((c) => c.type === 'ObjectSetup').length,
+    cmdt: components.filter((c) => c.type === 'CMDT').length,
+    apps: apps.length,
   };
   dbg('built', components.length, 'components', counts);
   return { components, counts, uiOrigin, apiBase, apiVersion };
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+// Keyboard shortcut (default Ctrl+Shift+Space, user-changeable in
+// about:addons → gear → Manage Extension Shortcuts) → tell the active tab.
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'toggle-spotlight') return;
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs && tabs[0];
+    if (!tab || tab.id == null) return;
+    chrome.tabs.sendMessage(tab.id, { action: 'toggleSpotlight' }, () => {
+      if (chrome.runtime.lastError) {
+        // Not a Salesforce tab (no content script) — ignore.
+        dbg('toggle-spotlight: no receiver', chrome.runtime.lastError.message);
+      }
+    });
+  } catch (e) {
+    dbgWarn('toggle-spotlight error', e);
+  }
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message || message.action !== 'fetchComponents') return false;
 
   const tabUrl = message.tabUrl || '';
   const forceRefresh = Boolean(message.forceRefresh);
+  // Firefox: the sending tab's cookie store (container/private window aware).
+  const tabStoreId = (sender && sender.tab && sender.tab.cookieStoreId) || '';
   let host;
   try { host = new URL(tabUrl).host; } catch { sendResponse({ ok: false, error: 'Bad URL' }); return false; }
 
-  dbg('fetchComponents', { host, forceRefresh });
+  dbg('fetchComponents', { host, forceRefresh, tabStoreId });
 
   (async () => {
     try {
@@ -433,7 +743,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           }
         }
       }
-      const fresh = await loadFromNetwork(tabUrl);
+      const fresh = await loadFromNetwork(tabUrl, tabStoreId);
       await chrome.storage.local.set({
         [key]: { updatedAt: Date.now(), components: fresh.components, counts: fresh.counts },
       });

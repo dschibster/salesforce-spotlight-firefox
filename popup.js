@@ -1,9 +1,22 @@
 /**
  * Salesforce Spotlight — popup settings (toolbar icon).
  * Persists to chrome.storage.local under key sfnav_settings.
+ *
+ * Firefox MV3 treats host_permissions as optional — the user has to grant
+ * them once. The banner at the top requests them via permissions.request.
  */
 
 const SETTINGS_KEY = 'sfnav_settings';
+
+const SF_ORIGINS = [
+  'https://*.salesforce.com/*',
+  'https://*.force.com/*',
+  'https://*.lightning.force.com/*',
+  'https://*.sandbox.lightning.force.com/*',
+  'https://*.my.salesforce.com/*',
+  'https://*.sandbox.my.salesforce.com/*',
+  'https://*.salesforce-setup.com/*',
+];
 
 const DEFAULT_SETTINGS = {
   enabledTypes: {
@@ -16,6 +29,10 @@ const DEFAULT_SETTINGS = {
     PermSetGroup: true,
     Trigger: true,
     VFPage: true,
+    Setup: true,
+    ObjectSetup: true,
+    CMDT: true,
+    App: true,
   },
   defaultDisplay: 'collapsed',
 };
@@ -47,6 +64,10 @@ function getSettingsFromForm() {
     PermSetGroup: Boolean(document.getElementById('typePermSetGroup')?.checked),
     Trigger: Boolean(document.getElementById('typeTrigger')?.checked),
     VFPage: Boolean(document.getElementById('typeVFPage')?.checked),
+    Setup: Boolean(document.getElementById('typeSetup')?.checked),
+    ObjectSetup: Boolean(document.getElementById('typeObjectSetup')?.checked),
+    CMDT: Boolean(document.getElementById('typeCMDT')?.checked),
+    App: Boolean(document.getElementById('typeApp')?.checked),
   };
   const expanded = document.getElementById('displayExpanded');
   const defaultDisplay =
@@ -65,6 +86,10 @@ function applySettingsToForm(settings) {
   const permSetGroup = document.getElementById('typePermSetGroup');
   const trigger = document.getElementById('typeTrigger');
   const vfPage = document.getElementById('typeVFPage');
+  const setup = document.getElementById('typeSetup');
+  const objectSetup = document.getElementById('typeObjectSetup');
+  const cmdt = document.getElementById('typeCMDT');
+  const app = document.getElementById('typeApp');
   if (flow) flow.checked = enabledTypes.Flow !== false;
   if (object) object.checked = enabledTypes.Object !== false;
   if (lwc) lwc.checked = enabledTypes.LWC !== false;
@@ -74,6 +99,10 @@ function applySettingsToForm(settings) {
   if (permSetGroup) permSetGroup.checked = enabledTypes.PermSetGroup !== false;
   if (trigger) trigger.checked = enabledTypes.Trigger !== false;
   if (vfPage) vfPage.checked = enabledTypes.VFPage !== false;
+  if (setup) setup.checked = enabledTypes.Setup !== false;
+  if (objectSetup) objectSetup.checked = enabledTypes.ObjectSetup !== false;
+  if (cmdt) cmdt.checked = enabledTypes.CMDT !== false;
+  if (app) app.checked = enabledTypes.App !== false;
 
   const expanded = document.getElementById('displayExpanded');
   const collapsed = document.getElementById('displayCollapsed');
@@ -106,6 +135,10 @@ function wireTypeToggles() {
     'typePermSetGroup',
     'typeTrigger',
     'typeVFPage',
+    'typeSetup',
+    'typeObjectSetup',
+    'typeCMDT',
+    'typeApp',
   ];
   for (const id of ids) {
     const el = document.getElementById(id);
@@ -129,10 +162,142 @@ function wireDisplayRadios() {
   }
 }
 
+/* ---------- Keyboard shortcut editor (Firefox commands.update) ---------- */
+
+const COMMAND_NAME = 'toggle-spotlight';
+
+async function loadShortcutIntoField() {
+  const input = document.getElementById('shortcutInput');
+  if (!input) return;
+  try {
+    const cmds = await chrome.commands.getAll();
+    const cmd = cmds.find((c) => c.name === COMMAND_NAME);
+    input.value = (cmd && cmd.shortcut) || '';
+  } catch {
+    input.value = '';
+  }
+}
+
+/** Map KeyboardEvent.code to the commands-API key name, or null if unsupported. */
+function commandKeyFromEvent(e) {
+  const code = e.code || '';
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^F([1-9]|1[0-2])$/.test(code)) return code;
+  const map = {
+    Space: 'Space',
+    Comma: 'Comma',
+    Period: 'Period',
+    Home: 'Home',
+    End: 'End',
+    PageUp: 'PageUp',
+    PageDown: 'PageDown',
+    Insert: 'Insert',
+    Delete: 'Delete',
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+  };
+  return map[code] || null;
+}
+
+/** Build a commands-API shortcut string ("Ctrl+Shift+Space") from a keydown. */
+function comboFromEvent(e) {
+  const isMac = (navigator.platform || '').toLowerCase().includes('mac');
+  const mods = [];
+  if (e.ctrlKey) mods.push(isMac ? 'MacCtrl' : 'Ctrl');
+  if (isMac && e.metaKey) mods.push('Command');
+  if (e.altKey) mods.push('Alt');
+  if (e.shiftKey) mods.push('Shift');
+  const key = commandKeyFromEvent(e);
+  if (!key) return null;
+  // Shift alone is not enough — commands need Ctrl/Alt/Cmd.
+  if (!mods.some((m) => m !== 'Shift')) return null;
+  return [...mods, key].join('+');
+}
+
+function wireShortcutEditor() {
+  const input = document.getElementById('shortcutInput');
+  const err = document.getElementById('shortcutError');
+  const reset = document.getElementById('shortcutReset');
+
+  if (input) {
+    input.addEventListener('keydown', async (e) => {
+      if (e.key === 'Tab') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+      const combo = comboFromEvent(e);
+      if (!combo) {
+        if (err) err.textContent = 'Needs Ctrl, Alt, or Cmd plus a letter, number, or F-key.';
+        return;
+      }
+      try {
+        await chrome.commands.update({ name: COMMAND_NAME, shortcut: combo });
+        input.value = combo;
+        input.blur();
+        if (err) err.textContent = '';
+      } catch (ex) {
+        if (err) err.textContent = `Firefox rejected "${combo}" — try another combination.`;
+      }
+    });
+    input.addEventListener('focus', () => {
+      if (err) err.textContent = '';
+      input.value = '';
+      input.placeholder = 'Press keys now…';
+    });
+    input.addEventListener('blur', () => {
+      input.placeholder = 'Click, then press keys…';
+      loadShortcutIntoField();
+    });
+  }
+
+  if (reset) {
+    reset.addEventListener('click', async () => {
+      try {
+        await chrome.commands.reset(COMMAND_NAME);
+      } catch {
+        /* ignore */
+      }
+      if (err) err.textContent = '';
+      loadShortcutIntoField();
+    });
+  }
+}
+
+async function refreshPermissionBanner() {
+  const banner = document.getElementById('permBanner');
+  if (!banner) return;
+  try {
+    const granted = await chrome.permissions.contains({ origins: SF_ORIGINS });
+    banner.classList.toggle('visible', !granted);
+  } catch {
+    banner.classList.remove('visible');
+  }
+}
+
+function wirePermissionGrant() {
+  const btn = document.getElementById('permGrantBtn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    try {
+      await chrome.permissions.request({ origins: SF_ORIGINS });
+    } catch {
+      /* user dismissed or request failed — banner stays */
+    }
+    refreshPermissionBanner();
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   loadAndApply().catch(() => {
     applySettingsToForm(DEFAULT_SETTINGS);
   });
   wireTypeToggles();
   wireDisplayRadios();
+  wirePermissionGrant();
+  refreshPermissionBanner();
+  wireShortcutEditor();
+  loadShortcutIntoField();
 });

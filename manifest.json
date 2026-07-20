@@ -1,8 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Salesforce Spotlight",
-  "version": "1.4.0",
-  "description": "Salesforce Spotlight: search flows, objects, LWC, Apex, profiles, permission sets, triggers, VF pages, and more from the spotlight bar.",
+  "version": "2.5.3",
+  "description": "Salesforce Spotlight: search flows, objects, LWC, Apex, profiles, permission sets, triggers, VF pages, setup pages, and more from the spotlight bar.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "salesforce-spotlight@mindsquare.de",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
   "permissions": ["cookies", "storage", "activeTab"],
   "host_permissions": [
     "https://*.salesforce.com/*",
@@ -10,10 +19,20 @@
     "https://*.lightning.force.com/*",
     "https://*.sandbox.lightning.force.com/*",
     "https://*.my.salesforce.com/*",
-    "https://*.sandbox.my.salesforce.com/*"
+    "https://*.sandbox.my.salesforce.com/*",
+    "https://*.salesforce-setup.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": ["background.js"]
+  },
+  "commands": {
+    "toggle-spotlight": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Space",
+        "mac": "MacCtrl+Shift+Space"
+      },
+      "description": "Open/close the Salesforce Spotlight search bar"
+    }
   },
   "content_scripts": [
     {
@@ -23,7 +42,8 @@
         "https://*.lightning.force.com/*",
         "https://*.sandbox.lightning.force.com/*",
         "https://*.my.salesforce.com/*",
-        "https://*.sandbox.my.salesforce.com/*"
+        "https://*.sandbox.my.salesforce.com/*",
+        "https://*.salesforce-setup.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"
