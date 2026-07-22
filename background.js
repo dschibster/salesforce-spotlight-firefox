@@ -23,8 +23,11 @@ function sidHint(sid) {
   return `${String(sid).slice(0, 8)}…(len ${String(sid).length})`;
 }
 
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const CACHE_PREFIX = 'sfnav_v13_';
+const CACHE_TTL_MS = 60 * 60 * 1000;
+// Bump this whenever the built component schema changes (new item types/links),
+// so an updated build ignores caches written by an older one instead of serving
+// a stale list until TTL — storage.local survives reinstalls (stable add-on id).
+const CACHE_PREFIX = 'sfnav_v16_';
 const API_VERSIONS = ['v66.0', 'v65.0', 'v64.0', 'v63.0', 'v62.0', 'v61.0', 'v60.0'];
 
 function resolveMyDomainOrigin(tabUrl) {
@@ -106,6 +109,20 @@ function cacheKey(host) {
 }
 
 /**
+ * Org-level cache host: collapse Lightning, Setup and My Domain hosts of the
+ * same org to one key (the canonical *.my.salesforce.com host), so the metadata
+ * cache and sticky choices are shared instead of split per subdomain.
+ */
+function orgCacheHost(tabUrl) {
+  const origin = resolveMyDomainOrigin(tabUrl);
+  try {
+    return origin ? new URL(origin).host : new URL(tabUrl).host;
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Words users can type to narrow by component type (e.g. "profile API access" finds profile "API Access").
  * Appended to every item's searchText; filter uses multi-token AND on this haystack.
  */
@@ -122,6 +139,7 @@ const TYPE_SEARCH_KEYWORDS = {
   Setup: 'setup',
   ObjectSetup: 'object setup manager',
   CMDT: 'cmdt custom metadata type',
+  CustomSetting: 'custom setting hierarchy list settings',
   App: 'app application anwendung launcher',
 };
 
@@ -134,7 +152,15 @@ const SETUP_PAGES = [
   { label: 'Object Manager', path: '/lightning/setup/ObjectManager/home', kw: 'objekt objects' },
   { label: 'Deployment Status', path: '/lightning/setup/DeployStatus/home', kw: 'deploy deployments bereitstellung' },
   { label: 'Flows', path: '/lightning/setup/Flows/home', kw: 'flow list all flows' },
-  { label: 'Users', path: '/lightning/setup/ManageUsersLightning/home', kw: 'user benutzer manage users' },
+  // No queryable flag exposes whether the org's Enhanced User List View is on,
+  // so ship both: the enhanced Lightning page as primary, the classic list as a
+  // lower-ranked fallback. Once the user opens one, its `choiceGroup` makes it
+  // stick per host (only the picked variant shows) until the cache is flushed.
+  { label: 'Users', path: '/lightning/setup/ManageUsersLightning/home', kw: 'user benutzer manage users enhanced', choiceGroup: 'users', choiceVariant: 'lightning' },
+  // No rank bump: it would sink below unrelated "…Users" permission-set-group
+  // matches and fall past the result cap. Equal rank keeps both Users entries
+  // together at the top (enhanced first via name tie-break).
+  { label: 'Users (Classic list)', path: '/lightning/setup/ManageUsers/home', kw: 'user benutzer manage users classic', choiceGroup: 'users', choiceVariant: 'classic' },
   { label: 'Profiles', path: '/lightning/setup/EnhancedProfiles/home', kw: 'profile profil' },
   { label: 'Permission Sets', path: '/lightning/setup/PermSets/home', kw: 'permset berechtigungssatz' },
   { label: 'Permission Set Groups', path: '/lightning/setup/PermSetGroups/home', kw: 'psg berechtigungssatzgruppe' },
@@ -408,15 +434,17 @@ function buildComponentList(
   // "URL no longer exists" page (my.salesforce.com no longer serves setup).
   const my = classicSetupOrigin(apiBase || o);
 
-  // CMDT setup links need the CustomObject Id (01I…) from the Tooling API,
-  // matched to the describeGlobal name (ns__Dev__mdt).
-  const mdtIdByApiName = new Map();
+  // CMDT and Custom Setting setup links need the CustomObject Id (01I…) from
+  // the Tooling API, matched to the describeGlobal name. The Tooling row holds
+  // the base DeveloperName (no __mdt/__c suffix), so key on ns__Dev and strip
+  // the suffix at lookup time.
+  const coIdByBaseName = new Map();
   for (const co of customObjects) {
     const dev = firstDefined(co, ['DeveloperName', 'developerName']);
     const ns = firstDefined(co, ['NamespacePrefix', 'namespacePrefix']);
     const id = firstDefined(co, ['Id', 'id']);
     if (!dev || !id) continue;
-    mdtIdByApiName.set(`${ns ? `${ns}__` : ''}${dev}__mdt`.toLowerCase(), id);
+    coIdByBaseName.set(`${ns ? `${ns}__` : ''}${dev}`.toLowerCase(), id);
   }
 
   for (const f of flows) {
@@ -442,7 +470,7 @@ function buildComponentList(
     // Custom metadata types: direct "open" + "manage records" setup links
     // instead of an (unusable) Object Manager entry.
     if (apiName.endsWith('__mdt')) {
-      const mdtId = mdtIdByApiName.get(apiName.toLowerCase());
+      const mdtId = coIdByBaseName.get(apiName.replace(/__mdt$/i, '').toLowerCase());
       const keyPrefix = s.keyPrefix || s.KeyPrefix;
       if (mdtId) {
         items.push({
@@ -464,6 +492,33 @@ function buildComponentList(
       }
       continue;
     }
+    // Custom settings: like CMDT, the Object Manager entry is a dead end.
+    // Offer a direct "open" (definition) plus the classic data-management page.
+    if (s.customSetting) {
+      const coId = coIdByBaseName.get(apiName.replace(/__c$/i, '').toLowerCase());
+      const keyPrefix = s.keyPrefix || s.KeyPrefix;
+      if (coId) {
+        items.push({
+          type: 'CustomSetting',
+          name: `${label} — Open (${apiName})`,
+          searchText: searchTextWithTypeKeywords('CustomSetting', `${label} ${apiName} open`),
+          url: `${my}/${coId}?setupid=CustomSettings`,
+        });
+      }
+      // Manage data page wants the entity KEY PREFIX as its id (not the Tooling
+      // object id, which it rejects as "Invalid Custom Setting id"). The extra
+      // ViewState params in the org's own "Manage" link are postback noise; a
+      // plain GET with id + setupid renders the same data view.
+      if (keyPrefix) {
+        items.push({
+          type: 'CustomSetting',
+          name: `${label} — Manage Records (${apiName})`,
+          searchText: searchTextWithTypeKeywords('CustomSetting', `${label} ${apiName} manage records`),
+          url: `${my}/setup/ui/listCustomSettingsData.apexp?id=${encodeURIComponent(keyPrefix)}&setupid=CustomSettings`,
+        });
+      }
+      continue;
+    }
     if (!s.retrieveable || apiName.endsWith('__ChangeEvent')) continue;
     items.push({
       type: 'Object',
@@ -471,9 +526,7 @@ function buildComponentList(
       searchText: searchTextWithTypeKeywords('Object', `${label} ${apiName}`),
       url: `${o}/lightning/setup/ObjectManager/${encodeURIComponent(apiName)}/Details/view`,
     });
-    // Object Manager deep links — only for real setup-manageable objects
-    // (customSetting/system objects clutter; keep those without subpages).
-    if (s.customSetting) continue;
+    // Object Manager deep links — only for real setup-manageable objects.
     for (const sub of OBJECT_SETUP_SUBPAGES) {
       items.push({
         type: 'ObjectSetup',
@@ -485,12 +538,18 @@ function buildComponentList(
     }
   }
   for (const sp of SETUP_PAGES) {
-    items.push({
+    const item = {
       type: 'Setup',
       name: sp.label,
       searchText: searchTextWithTypeKeywords('Setup', `${sp.label} ${sp.kw}`),
       url: `${o}${sp.path}`,
-    });
+      rank: sp.rank || 0,
+    };
+    if (sp.choiceGroup) {
+      item.choiceGroup = sp.choiceGroup;
+      item.choiceVariant = sp.choiceVariant;
+    }
+    items.push(item);
   }
   for (const a of apps) {
     const durableId = firstDefined(a, ['DurableId', 'durableId']);
@@ -644,7 +703,10 @@ async function loadFromNetwork(tabUrl, tabStoreId) {
       'SELECT Id,Name FROM Profile', 'profiles', false
     ).catch(e => { dbgWarn('profiles', e); return []; }),
     soqlQuery(apiBase, sid, apiVersion,
-      'SELECT Id,Name,Label FROM PermissionSet WHERE IsOwnedByProfile = false', 'permSets', false
+      // PermissionSetGroupId = null drops the auto-created "group" permission
+      // sets that back each Permission Set Group — they exist for assignment
+      // only and have no openable setup page (opening one dead-ends).
+      'SELECT Id,Name,Label FROM PermissionSet WHERE IsOwnedByProfile = false AND PermissionSetGroupId = null', 'permSets', false
     ).catch(e => { dbgWarn('permSets', e); return []; }),
     soqlQuery(apiBase, sid, apiVersion,
       'SELECT Id,MasterLabel,DeveloperName FROM PermissionSetGroup', 'permSetGroups', false
@@ -691,6 +753,7 @@ async function loadFromNetwork(tabUrl, tabStoreId) {
     setup: SETUP_PAGES.length,
     objectSetup: components.filter((c) => c.type === 'ObjectSetup').length,
     cmdt: components.filter((c) => c.type === 'CMDT').length,
+    customSettings: components.filter((c) => c.type === 'CustomSetting').length,
     apps: apps.length,
   };
   dbg('built', components.length, 'components', counts);
@@ -723,8 +786,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const forceRefresh = Boolean(message.forceRefresh);
   // Firefox: the sending tab's cookie store (container/private window aware).
   const tabStoreId = (sender && sender.tab && sender.tab.cookieStoreId) || '';
-  let host;
-  try { host = new URL(tabUrl).host; } catch { sendResponse({ ok: false, error: 'Bad URL' }); return false; }
+  const host = orgCacheHost(tabUrl);
+  if (!host) { sendResponse({ ok: false, error: 'Bad URL' }); return false; }
 
   dbg('fetchComponents', { host, forceRefresh, tabStoreId });
 
@@ -738,7 +801,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const age = Date.now() - entry.updatedAt;
           if (age < CACHE_TTL_MS) {
             dbg('cache HIT', key, entry.components.length, 'items, age', age);
-            sendResponse({ ok: true, components: entry.components, cached: true, counts: entry.counts });
+            // Content applies the choices (drops not-picked choice-group siblings)
+            // so selection takes effect live without racing the cache write.
+            sendResponse({ ok: true, components: entry.components, cached: true, counts: entry.counts, choices: entry.choices || {} });
             return;
           }
         }
@@ -748,10 +813,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         [key]: { updatedAt: Date.now(), components: fresh.components, counts: fresh.counts },
       });
       dbg('stored', fresh.components.length, 'components');
-      sendResponse({ ok: true, components: fresh.components, cached: false, counts: fresh.counts });
+      // A fresh build resets choices — both variants show until the user picks again.
+      sendResponse({ ok: true, components: fresh.components, cached: false, counts: fresh.counts, choices: {} });
     } catch (err) {
       dbgWarn('error', err);
       sendResponse({ ok: false, error: err && err.message ? err.message : String(err) });
+    }
+  })();
+  return true;
+});
+
+// Persist a per-org choice (e.g. which "Users" variant the user opened). Stored
+// inside the org's cache entry so it lives exactly as long as the cache does —
+// a refresh/flush rebuilds the entry and the choice resets, showing both again.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || message.action !== 'setChoice') return false;
+  const tabUrl = message.tabUrl || '';
+  const group = message.choiceGroup;
+  const variant = message.choiceVariant;
+  const host = orgCacheHost(tabUrl);
+  if (!host) { sendResponse({ ok: false }); return false; }
+  if (!group || !variant) { sendResponse({ ok: false }); return false; }
+
+  (async () => {
+    try {
+      const key = cacheKey(host);
+      const stored = await chrome.storage.local.get(key);
+      const entry = stored[key];
+      // No cache entry means nothing to stick the choice to; it will simply be
+      // recorded on the next open after the cache is built.
+      if (!entry || !Array.isArray(entry.components)) { sendResponse({ ok: false }); return; }
+      const choices = { ...(entry.choices || {}), [group]: variant };
+      // Preserve updatedAt so recording a choice never extends the cache TTL.
+      await chrome.storage.local.set({ [key]: { ...entry, choices } });
+      dbg('setChoice', group, '=', variant, 'for', host);
+      sendResponse({ ok: true });
+    } catch (err) {
+      dbgWarn('setChoice error', err);
+      sendResponse({ ok: false });
     }
   })();
   return true;

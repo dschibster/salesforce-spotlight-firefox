@@ -48,6 +48,7 @@
       Setup: true,
       ObjectSetup: true,
       CMDT: true,
+      CustomSetting: true,
       App: true,
     },
     defaultDisplay: 'collapsed',
@@ -518,6 +519,12 @@
   box-shadow: 0 0 0 1px inset rgba(132, 204, 22, 0.3);
 }
 
+.sfnav-badge--customsetting {
+  background: rgba(234, 179, 8, 0.25);
+  color: #fde047;
+  box-shadow: 0 0 0 1px inset rgba(234, 179, 8, 0.3);
+}
+
 .sfnav-badge--app {
   background: rgba(14, 165, 233, 0.25);
   color: #7dd3fc;
@@ -557,6 +564,9 @@
   let shadow;
   let els;
   let components = [];
+  // Per-host sticky choices (group → picked variant), e.g. { users: 'classic' }.
+  // Loaded with each component fetch; a choice hides its not-picked siblings.
+  let hostChoices = {};
   let filtered = [];
   let selectedIndex = -1;
   let debounceTimer = null;
@@ -669,6 +679,7 @@
       if (en.Setup) parts4.push(`${c.setup ?? 0} setup pages`);
       if (en.ObjectSetup) parts4.push(`${c.objectSetup ?? 0} object setup links`);
       if (en.CMDT) parts4.push(`${c.cmdt ?? 0} CMDT`);
+      if (en.CustomSetting) parts4.push(`${c.customSettings ?? 0} custom settings`);
       if (en.App) parts4.push(`${c.apps ?? 0} apps`);
 
       if (parts1.length === 0 && parts2.length === 0 && parts3.length === 0 && parts4.length === 0) {
@@ -730,6 +741,18 @@
     });
   }
 
+  /** Fire-and-forget: tell the background to remember a per-host choice. */
+  function recordChoice(choiceGroup, choiceVariant) {
+    try {
+      chrome.runtime.sendMessage(
+        { action: 'setChoice', tabUrl: window.location.href, choiceGroup, choiceVariant },
+        () => void chrome.runtime.lastError // swallow "no receiver" noise
+      );
+    } catch (e) {
+      dbgWarn('recordChoice failed', e);
+    }
+  }
+
   async function loadComponents(forceRefresh) {
     setStatus(forceRefresh ? 'Refreshing…' : 'Loading components…', 'loading');
     if (els && els.input) els.input.disabled = true;
@@ -747,6 +770,7 @@
     }
 
     components = Array.isArray(result.components) ? result.components : [];
+    hostChoices = result.choices && typeof result.choices === 'object' ? result.choices : {};
     lastCounts = result.counts && typeof result.counts === 'object' ? result.counts : null;
     dbg('loadComponents OK', 'in-memory length', components.length);
     setReadyStatus(lastCounts, components.length);
@@ -764,6 +788,7 @@
     { cmd: 'setup', type: 'Setup', hint: 'Setup pages' },
     { cmd: 'objsetup', type: 'ObjectSetup', hint: 'Object Manager pages' },
     { cmd: 'cmdt', type: 'CMDT', hint: 'Custom metadata types' },
+    { cmd: 'cs', type: 'CustomSetting', hint: 'Custom settings' },
     { cmd: 'apex', type: 'Apex', hint: 'Apex classes' },
     { cmd: 'lwc', type: 'LWC', hint: 'Lightning web components' },
     { cmd: 'profile', type: 'Profile', hint: 'Profiles' },
@@ -781,6 +806,9 @@
     vfpage: 'VFPage',
     os: 'ObjectSetup',
     anwendung: 'App',
+    customsetting: 'CustomSetting',
+    setting: 'CustomSetting',
+    settings: 'CustomSetting',
   };
   const SLASH_TYPE_BY_CMD = (() => {
     const m = { ...SLASH_ALIASES };
@@ -808,6 +836,13 @@
    * somewhere in the haystack. "send pdf" matches "NOVA Automatic Send Quote PDF".
    * Scoring: exact substring > all-tokens-match; earlier positions rank higher.
    */
+  /** A resolved choice group hides its not-picked siblings. */
+  function choiceHidden(item) {
+    if (!item.choiceGroup) return false;
+    const picked = hostChoices[item.choiceGroup];
+    return picked != null && picked !== item.choiceVariant;
+  }
+
   function filterComponents(query) {
     const parsed = parseQuery(query);
 
@@ -827,7 +862,7 @@
     // Bare command like "/app" → list everything of that type.
     if (!q && restrictType) {
       return components
-        .filter((item) => item.type === restrictType)
+        .filter((item) => item.type === restrictType && !choiceHidden(item))
         .sort((a, b) => (a.rank || 0) - (b.rank || 0) || a.name.localeCompare(b.name))
         .slice(0, limit);
     }
@@ -839,6 +874,7 @@
     const scored = [];
     for (let i = 0; i < components.length; i += 1) {
       const item = components[i];
+      if (choiceHidden(item)) continue;
       if (restrictType) {
         // Explicit slash command overrides the type toggles in settings.
         if (item.type !== restrictType) continue;
@@ -907,6 +943,8 @@
         return 'sfnav-badge sfnav-badge--objectsetup';
       case 'CMDT':
         return 'sfnav-badge sfnav-badge--cmdt';
+      case 'CustomSetting':
+        return 'sfnav-badge sfnav-badge--customsetting';
       case 'App':
         return 'sfnav-badge sfnav-badge--app';
       default:
@@ -987,6 +1025,13 @@
       return;
     }
     if (!item.url) return;
+    // Sticky per-host choice: opening one variant of a choice group hides its
+    // siblings immediately (via hostChoices) and persists so it survives
+    // reloads until the cache is flushed.
+    if (item.choiceGroup) {
+      hostChoices[item.choiceGroup] = item.choiceVariant;
+      recordChoice(item.choiceGroup, item.choiceVariant);
+    }
     window.open(item.url, '_blank', 'noopener,noreferrer');
     if (els && els.input) {
       els.input.value = '';

@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS = {
     Setup: true,
     ObjectSetup: true,
     CMDT: true,
+    CustomSetting: true,
     App: true,
   },
   defaultDisplay: 'collapsed',
@@ -79,6 +80,7 @@ function getSettingsFromForm() {
     Setup: Boolean(document.getElementById('typeSetup')?.checked),
     ObjectSetup: Boolean(document.getElementById('typeObjectSetup')?.checked),
     CMDT: Boolean(document.getElementById('typeCMDT')?.checked),
+    CustomSetting: Boolean(document.getElementById('typeCustomSetting')?.checked),
     App: Boolean(document.getElementById('typeApp')?.checked),
   };
   const expanded = document.getElementById('displayExpanded');
@@ -106,6 +108,7 @@ function applySettingsToForm(settings) {
   const setup = document.getElementById('typeSetup');
   const objectSetup = document.getElementById('typeObjectSetup');
   const cmdt = document.getElementById('typeCMDT');
+  const customSetting = document.getElementById('typeCustomSetting');
   const app = document.getElementById('typeApp');
   if (flow) flow.checked = enabledTypes.Flow !== false;
   if (object) object.checked = enabledTypes.Object !== false;
@@ -119,6 +122,7 @@ function applySettingsToForm(settings) {
   if (setup) setup.checked = enabledTypes.Setup !== false;
   if (objectSetup) objectSetup.checked = enabledTypes.ObjectSetup !== false;
   if (cmdt) cmdt.checked = enabledTypes.CMDT !== false;
+  if (customSetting) customSetting.checked = enabledTypes.CustomSetting !== false;
   if (app) app.checked = enabledTypes.App !== false;
 
   const expanded = document.getElementById('displayExpanded');
@@ -166,6 +170,7 @@ function wireTypeToggles() {
     'typeSetup',
     'typeObjectSetup',
     'typeCMDT',
+    'typeCustomSetting',
     'typeApp',
   ];
   for (const id of ids) {
