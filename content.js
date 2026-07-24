@@ -55,6 +55,8 @@
     /** Small floating button shown while the bar is hidden, to reopen it without the keyboard shortcut. */
     reopenButtonEnabled: true,
     buttonPosition: 'bottom-right',
+    /** User-defined setup pages: [{ label, path }] where path is origin-relative. */
+    customSetupPages: [],
   };
 
   /**
@@ -86,7 +88,13 @@
     if (raw && typeof raw === 'object' && BUTTON_POSITIONS.includes(raw.buttonPosition)) {
       buttonPosition = raw.buttonPosition;
     }
-    return { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition };
+    let customSetupPages = [];
+    if (raw && typeof raw === 'object' && Array.isArray(raw.customSetupPages)) {
+      customSetupPages = raw.customSetupPages
+        .filter((p) => p && typeof p.path === 'string' && p.path.startsWith('/'))
+        .map((p) => ({ label: String(p.label || p.path), path: p.path }));
+    }
+    return { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition, customSetupPages };
   }
 
   /** @type {{ enabledTypes: Record<string, boolean>, defaultDisplay: 'expanded' | 'collapsed', reopenButtonEnabled: boolean, buttonPosition: string }} */
@@ -563,7 +571,12 @@
 
   let shadow;
   let els;
+  // Server-provided items; `components` is these plus the user's custom setup pages.
+  let baseComponents = [];
   let components = [];
+  // Lightning UI origin for the current org (from the background), used to build
+  // user-defined setup page URLs so a stored path works on any org.
+  let uiOrigin = '';
   // Per-host sticky choices (group → picked variant), e.g. { users: 'classic' }.
   // Loaded with each component fetch; a choice hides its not-picked siblings.
   let hostChoices = {};
@@ -769,11 +782,30 @@
       return;
     }
 
-    components = Array.isArray(result.components) ? result.components : [];
+    baseComponents = Array.isArray(result.components) ? result.components : [];
     hostChoices = result.choices && typeof result.choices === 'object' ? result.choices : {};
+    if (typeof result.uiOrigin === 'string' && result.uiOrigin) uiOrigin = result.uiOrigin;
     lastCounts = result.counts && typeof result.counts === 'object' ? result.counts : null;
+    rebuildComponents();
     dbg('loadComponents OK', 'in-memory length', components.length);
     setReadyStatus(lastCounts, components.length);
+  }
+
+  /** Map the user's saved setup pages to searchable Setup items on the current org. */
+  function buildCustomSetupItems() {
+    if (!uiOrigin) return [];
+    const base = uiOrigin.replace(/\/$/, '');
+    return (userSettings.customSetupPages || []).map((p) => ({
+      type: 'Setup',
+      name: p.label,
+      searchText: `${p.label} ${p.path} setup`.toLowerCase(),
+      url: `${base}${p.path}`,
+    }));
+  }
+
+  /** `components` = server items + the user's custom setup pages. */
+  function rebuildComponents() {
+    components = baseComponents.concat(buildCustomSetupItems());
   }
 
   function normalizeQuery(q) {
@@ -1222,6 +1254,10 @@
     const ch = changes[SETTINGS_KEY];
     const prev = mergeUserSettings(ch.oldValue);
     userSettings = mergeUserSettings(ch.newValue);
+    // Custom setup pages edited in the popup: rebuild the merged list live.
+    if (JSON.stringify(prev.customSetupPages) !== JSON.stringify(userSettings.customSetupPages)) {
+      rebuildComponents();
+    }
     if (els) {
       setReadyStatus(lastCounts, components.length);
       if (els.input && normalizeQuery(els.input.value)) {

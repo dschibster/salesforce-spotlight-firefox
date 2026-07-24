@@ -40,7 +40,44 @@ const DEFAULT_SETTINGS = {
   defaultDisplay: 'collapsed',
   reopenButtonEnabled: true,
   buttonPosition: 'bottom-right',
+  customSetupPages: [],
 };
+
+/** Working copy of the user's custom setup pages (dynamic list, not static fields). */
+let customSetupPages = [];
+
+function sanitizeCustomSetupPages(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((p) => p && typeof p.path === 'string' && p.path.startsWith('/'))
+    .map((p) => ({ label: String(p.label || p.path), path: p.path }));
+}
+
+/**
+ * Accept a full setup URL, an origin-relative path, or a bare node name and
+ * normalize to an origin-relative setup path. Returns '' if it can't.
+ */
+function normalizeSetupInput(raw) {
+  const v = (raw || '').trim();
+  if (!v) return '';
+  if (/^https?:\/\//i.test(v)) {
+    try {
+      const u = new URL(v);
+      return (u.pathname || '') + (u.search || '');
+    } catch {
+      return '';
+    }
+  }
+  if (v.startsWith('/')) return v;
+  // Bare node name → standard Lightning setup home for that node.
+  return `/lightning/setup/${v}/home`;
+}
+
+/** Best-effort label from a setup path, e.g. .../setup/OmniChannelSettings/home → OmniChannelSettings. */
+function labelFromPath(path) {
+  const m = /\/setup\/([^/?]+)/.exec(path);
+  return m ? m[1] : path;
+}
 
 function mergeWithDefaults(stored) {
   const enabledTypes = { ...DEFAULT_SETTINGS.enabledTypes };
@@ -63,7 +100,8 @@ function mergeWithDefaults(stored) {
   if (stored && BUTTON_POSITIONS.includes(stored.buttonPosition)) {
     buttonPosition = stored.buttonPosition;
   }
-  return { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition };
+  const customPages = sanitizeCustomSetupPages(stored && stored.customSetupPages);
+  return { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition, customSetupPages: customPages };
 }
 
 function getSettingsFromForm() {
@@ -91,11 +129,19 @@ function getSettingsFromForm() {
   const buttonPosition = positionInput && BUTTON_POSITIONS.includes(positionInput.value)
     ? positionInput.value
     : DEFAULT_SETTINGS.buttonPosition;
-  return { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition };
+  return {
+    enabledTypes,
+    defaultDisplay,
+    reopenButtonEnabled,
+    buttonPosition,
+    customSetupPages: sanitizeCustomSetupPages(customSetupPages),
+  };
 }
 
 function applySettingsToForm(settings) {
   const { enabledTypes, defaultDisplay, reopenButtonEnabled, buttonPosition } = settings;
+  customSetupPages = sanitizeCustomSetupPages(settings.customSetupPages);
+  renderCustomSetupPages();
   const flow = document.getElementById('typeFlow');
   const object = document.getElementById('typeObject');
   const lwc = document.getElementById('typeLwc');
@@ -180,6 +226,84 @@ function wireTypeToggles() {
         saveSettings(getSettingsFromForm());
       });
     }
+  }
+}
+
+/* ---------- Custom setup pages ---------- */
+
+function renderCustomSetupPages() {
+  const list = document.getElementById('customPagesList');
+  if (!list) return;
+  list.textContent = '';
+  if (customSetupPages.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'custom-empty';
+    empty.textContent = 'No custom setup pages yet.';
+    list.appendChild(empty);
+    return;
+  }
+  customSetupPages.forEach((page, i) => {
+    const row = document.createElement('div');
+    row.className = 'custom-row';
+
+    const text = document.createElement('div');
+    text.className = 'custom-text';
+    const label = document.createElement('span');
+    label.className = 'custom-label';
+    label.textContent = page.label;
+    const path = document.createElement('span');
+    path.className = 'custom-path';
+    path.textContent = page.path;
+    text.appendChild(label);
+    text.appendChild(path);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'custom-remove';
+    remove.setAttribute('aria-label', `Remove ${page.label}`);
+    remove.textContent = '✕';
+    remove.addEventListener('click', () => {
+      customSetupPages.splice(i, 1);
+      renderCustomSetupPages();
+      saveSettings(getSettingsFromForm());
+    });
+
+    row.appendChild(text);
+    row.appendChild(remove);
+    list.appendChild(row);
+  });
+}
+
+function addCustomSetupPageFromInputs() {
+  const urlInput = document.getElementById('customPageUrl');
+  const labelInput = document.getElementById('customPageLabel');
+  const err = document.getElementById('customPageError');
+  if (!urlInput) return;
+  const path = normalizeSetupInput(urlInput.value);
+  if (!path) {
+    if (err) err.textContent = 'Enter a setup URL, a /path, or a node name.';
+    return;
+  }
+  const label = (labelInput && labelInput.value.trim()) || labelFromPath(path);
+  customSetupPages.push({ label, path });
+  if (err) err.textContent = '';
+  if (urlInput) urlInput.value = '';
+  if (labelInput) labelInput.value = '';
+  renderCustomSetupPages();
+  saveSettings(getSettingsFromForm());
+}
+
+function wireCustomSetupPages() {
+  const add = document.getElementById('customPageAdd');
+  if (add) add.addEventListener('click', addCustomSetupPageFromInputs);
+  const urlInput = document.getElementById('customPageUrl');
+  if (urlInput) {
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addCustomSetupPageFromInputs();
+      }
+    });
   }
 }
 
@@ -346,6 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applySettingsToForm(DEFAULT_SETTINGS);
   });
   wireTypeToggles();
+  wireCustomSetupPages();
   wireDisplayRadios();
   wireReopenButtonToggle();
   wireButtonPositionRadios();

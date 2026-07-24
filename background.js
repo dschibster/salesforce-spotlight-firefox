@@ -791,6 +791,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   dbg('fetchComponents', { host, forceRefresh, tabStoreId });
 
+  // Lightning UI origin for the current org — content builds user-defined setup
+  // page URLs against this so a stored path resolves on whatever org you browse.
+  const uiOrigin = resolveUiOrigin(tabUrl);
+
   (async () => {
     try {
       const key = cacheKey(host);
@@ -803,7 +807,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             dbg('cache HIT', key, entry.components.length, 'items, age', age);
             // Content applies the choices (drops not-picked choice-group siblings)
             // so selection takes effect live without racing the cache write.
-            sendResponse({ ok: true, components: entry.components, cached: true, counts: entry.counts, choices: entry.choices || {} });
+            sendResponse({ ok: true, components: entry.components, cached: true, counts: entry.counts, choices: entry.choices || {}, uiOrigin });
             return;
           }
         }
@@ -814,7 +818,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       dbg('stored', fresh.components.length, 'components');
       // A fresh build resets choices — both variants show until the user picks again.
-      sendResponse({ ok: true, components: fresh.components, cached: false, counts: fresh.counts, choices: {} });
+      sendResponse({ ok: true, components: fresh.components, cached: false, counts: fresh.counts, choices: {}, uiOrigin: fresh.uiOrigin || uiOrigin });
     } catch (err) {
       dbgWarn('error', err);
       sendResponse({ ok: false, error: err && err.message ? err.message : String(err) });

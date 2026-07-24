@@ -303,6 +303,106 @@
         font-size: 11px;
         color: #fbbf24;
       }
+      .custom-add {
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
+      }
+      .custom-add-fields {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .custom-input {
+        width: 100%;
+        padding: 9px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 13px;
+        outline: none;
+        box-sizing: border-box;
+      }
+      .custom-input:focus {
+        border-color: rgba(139, 92, 246, 0.5);
+        box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+      }
+      .custom-add-btn {
+        padding: 0 16px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(139, 92, 246, 0.2);
+        color: var(--text);
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .custom-add-btn:hover {
+        background: rgba(139, 92, 246, 0.35);
+      }
+      .custom-error {
+        margin: 6px 0 0;
+        min-height: 14px;
+        font-size: 11px;
+        color: #fbbf24;
+      }
+      .custom-list {
+        margin-top: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .custom-empty {
+        font-size: 12px;
+        color: var(--muted);
+        padding: 4px 2px;
+      }
+      .custom-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .custom-text {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .custom-label {
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .custom-path {
+        font-size: 11px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .custom-remove {
+        flex: none;
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--muted);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      .custom-remove:hover {
+        background: rgba(239, 68, 68, 0.2);
+        color: #fecaca;
+      }
     </style>
   </head>
   <body>
@@ -476,6 +576,20 @@
           <span class="switch-slider" aria-hidden="true"></span>
         </label>
       </div>
+    </section>
+
+    <section aria-labelledby="custom-pages-heading">
+      <h2 id="custom-pages-heading" class="section-title">Custom setup pages</h2>
+      <p class="section-hint">Add any Setup page to search results. Paste its URL from your browser, a /lightning/setup/… path, or just the node name (e.g. OmniChannelSettings). These search under the "Setup" type.</p>
+      <div class="custom-add">
+        <div class="custom-add-fields">
+          <input type="text" class="custom-input" id="customPageLabel" placeholder="Label (optional, e.g. Omni-Channel Settings)" aria-label="Custom setup page label" />
+          <input type="text" class="custom-input" id="customPageUrl" placeholder="Setup URL, /path, or node name" aria-label="Custom setup page URL, path, or node name" />
+        </div>
+        <button type="button" class="custom-add-btn" id="customPageAdd">Add</button>
+      </div>
+      <p class="custom-error" id="customPageError" aria-live="polite"></p>
+      <div class="custom-list" id="customPagesList"></div>
     </section>
 
     <script src="popup.js"></script>
